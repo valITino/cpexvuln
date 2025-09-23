@@ -17,6 +17,37 @@ def iso(dt: datetime) -> str:
     """Return NVD-friendly ISO with millis and trailing Z (UTC)."""
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
+
+def parse_iso(value: str) -> datetime:
+    """Parse ISO timestamps emitted by NVD and return an aware ``datetime``.
+
+    The NVD API returns timestamps with a ``Z`` suffix and optional
+    millisecond precision (``%Y-%m-%dT%H:%M:%S[.fff]Z``).  We keep the parser
+    lenient so that persisted state does not break if formatting changes
+    slightly.  Invalid or empty strings fall back to ``now_utc()`` which keeps
+    scheduling logic robust instead of raising and aborting a run.
+    """
+
+    if not value:
+        return now_utc()
+
+    text = value.strip()
+    tz = timezone.utc
+    if text.endswith("Z"):
+        text = text[:-1]
+
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=tz)
+        except ValueError:
+            pass
+
+    try:
+        dt = datetime.fromisoformat(text)
+        return dt if dt.tzinfo else dt.replace(tzinfo=tz)
+    except ValueError:
+        return now_utc()
+
 # --- files & json (Path-aware) ------------------------------------------------
 
 def _p(p: os.PathLike | str) -> Path:
