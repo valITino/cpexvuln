@@ -1,0 +1,20 @@
+{
+  "lists": [
+    {
+      "cpes": [
+        "cpe:2.3:o:cisco:ios:*:*:*:*:*:*:*"
+      ],
+      "id": "1cefbf3b-723f-4c95-8a29-aacd0efee6a3",
+      "insecure": true,
+      "name": "Cisco"
+    },
+    {
+      "cpes": [
+        "cpe:2.3:a:microsoft:365_apps:-:*:*:*:enterprise:*:x64:*"
+      ],
+      "id": "f0f60575-e9a4-4a56-af6a-9ed132b897aa",
+      "insecure": false,
+      "name": "MS Apps"
+    }
+  ]
+}

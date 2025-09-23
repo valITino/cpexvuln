@@ -1,0 +1,4 @@
+Flask
+requests
+# optional if your org CA is in Windows Trust Store and you want Requests to use it:
+# certifi-win32

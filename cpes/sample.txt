@@ -1,0 +1,2 @@
+cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:x64:*
+cpe:2.3:o:canonical:ubuntu_linux:*:*:*:*:*:*:*
