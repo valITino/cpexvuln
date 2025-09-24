@@ -1,673 +1,724 @@
-"""Web UI for the CPE watch application."""
-from __future__ import annotations
-
+import os
+import uuid
 import csv
 import io
 import json
-import logging
-import os
-import secrets
-import uuid
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Tuple
 
-from flask import (
-    Flask,
-    Response,
-    abort,
-    jsonify,
-    render_template,
-    request,
-    session,
-)
-from werkzeug.exceptions import HTTPException
+from flask import Flask, render_template_string, request, redirect, url_for, flash, Response
 
-from .config import (
-    DAILY_LOOKBACK_HOURS,
-    EXTENDED_LOOKBACK_DAYS,
-    LONG_BACKFILL_DAYS,
-    STATE_FILE,
-    WATCHLISTS_FILE,
-)
-from .nvd import build_session, iter_cpe_products
+from .config import WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS, LONG_BACKFILL_DAYS
+from .utils import load_json, save_json, now_utc, hash_for_cpes
+from .nvd import build_session
 from .scan import run_scan
-from .utils import (
-    default_project,
-    hash_for_cpes,
-    has_specific_version,
-    is_valid_cpe,
-    iso,
-    load_json,
-    migrate_watchlists,
-    normalize_watchlist_options,
-    now_utc,
-    save_json,
-)
+
+TEMPLATE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVD CPE Watch</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .badge { display:inline-flex; align-items:center; padding:0 0.5rem; border-radius:9999px; font-size:0.75rem; line-height:1.25rem; font-weight:600; }
+  .sev-Critical { background:#dc2626; color:#fff; } .sev-High { background:#ef4444; color:#fff; }
+  .sev-Medium  { background:#f59e0b; color:#fff; } .sev-Low { background:#16a34a; color:#fff; }
+  .sev-None    { background:#9ca3af; color:#fff; }
+  th.sortable { cursor:pointer; }
+  #stickyBox { position: sticky; top: 12px; z-index: 10; }
+  thead.sticky th { position: sticky; top: 0; background: #f8fafc; z-index: 5; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+<div class="h-screen flex">
+  <!-- Sidebar -->
+  <aside id="sidebar" class="w-80 bg-white border-r border-slate-200 overflow-y-auto">
+    <div class="sticky top-0 z-20 bg-white border-b border-slate-200 p-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" class="h-5 w-5 text-indigo-600" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 7h16M4 12h16M4 17h10"/>
+          </svg>
+          <span class="font-semibold">CPE Watch</span>
+        </div>
+        <a href="#create" class="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-500">New</a>
+      </div>
+
+      <div class="mt-3 flex gap-2">
+        <div class="relative flex-1">
+          <input id="wlSearch" class="w-full border rounded-lg pl-8 pr-2 py-1.5 text-sm" placeholder="Search watchlists">
+          <svg viewBox="0 0 24 24" class="absolute left-2 top-1.5 h-5 w-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>
+          </svg>
+        </div>
+        <button id="selectMode" class="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-50">Select</button>
+        <form method="post" action="{{ url_for('delete_lists') }}" id="bulkDelForm" onsubmit="return confirm('Delete selected watchlists?');">
+          <input type="hidden" name="ids" id="bulkIds" value="">
+          <button id="bulkDelete" disabled class="text-xs px-2 py-1 rounded bg-red-600 text-white disabled:opacity-40">Delete</button>
+        </form>
+      </div>
+
+      <div class="mt-2 flex items-center gap-3 text-xs text-slate-600">
+        <label class="flex items-center gap-2">
+          <input id="wlSelectAll" type="checkbox" class="h-4 w-4" disabled>
+          <span>All</span>
+        </label>
+        <span class="text-slate-300">•</span>
+        <button class="text-indigo-600 hover:underline text-xs" onclick="document.querySelector('#cpesField')?.scrollIntoView({behavior:'smooth'}); return false;">
+          Create watch
+        </button>
+      </div>
+    </div>
+
+    {% if watchlists %}
+      <ul id="wlList" class="p-3 space-y-1">
+        {% for w in watchlists %}
+          <li class="relative group" data-id="{{ w.id }}">
+            <div class="grid grid-cols-[auto_1fr_auto] items-start gap-2 p-3 rounded-lg hover:bg-slate-50
+                        {% if current and current.id==w.id %}bg-slate-50 ring-1 ring-indigo-200{% endif %}">
+              <!-- checkbox (only in Select mode) -->
+              <input type="checkbox" class="wlbox h-4 w-4 mt-0.5 hidden" value="{{ w.id }}">
+
+              <!-- main link -->
+              <a href="{{ url_for('open_watchlist', wid=w.id) }}"
+                 class="wlLink min-w-0"
+                 data-key="{{ (w.name ~ ' ' ~ (w.cpes|join(' ')))|lower }}">
+                <div class="text-sm font-medium truncate">{{ w.name }}</div>
+                <div class="text-xs text-slate-500 truncate">
+                  {{ w.cpes|length }} CPE{{ 's' if w.cpes|length != 1 else '' }}
+                  • {{ (w.cpes[0] if w.cpes else '')|replace('cpe:2.3:','') }}
+                </div>
+              </a>
+
+              <!-- quick actions -->
+              <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <a title="Scan 24h" class="text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50"
+                   data-no-toggle href="{{ url_for('run_watchlist', wid=w.id, win='24h') }}">24h</a>
+                <a title="Backfill 90d" class="text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50"
+                   data-no-toggle href="{{ url_for('run_watchlist', wid=w.id, win='90d') }}">90d</a>
+
+                <div class="relative" data-no-toggle>
+                  <button type="button" class="px-1.5 py-1 rounded hover:bg-slate-100 text-slate-600"
+                          onclick="this.nextElementSibling.classList.toggle('hidden'); event.preventDefault();">⋯</button>
+                  <div class="menuPanel hidden absolute right-0 mt-1 w-44 bg-white border rounded shadow z-10">
+                    <a class="block px-3 py-2 text-sm hover:bg-slate-50" href="{{ url_for('export_json', wid=w.id, win='24h') }}">Export JSON (24h)</a>
+                    <a class="block px-3 py-2 text-sm hover:bg-slate-50" href="{{ url_for('export_csv', wid=w.id, win='24h') }}">Export CSV (24h)</a>
+                    <a class="block px-3 py-2 text-sm hover:bg-slate-50" href="{{ url_for('export_json', wid=w.id, win='90d') }}">Export JSON (90d)</a>
+                    <a class="block px-3 py-2 text-sm hover:bg-slate-50" href="{{ url_for('export_csv', wid=w.id, win='90d') }}">Export CSV (90d)</a>
+                    <a class="block px-3 py-2 text-sm hover:bg-slate-50"
+                       href="mailto:?subject={{ ('CPE Watchlist - ' + w.name)|urlencode }}&body={{ ('Open: ' + request.host_url.rstrip('/') + url_for('open_watchlist', wid=w.id))|urlencode }}">
+                      Share via email
+                    </a>
+                    <a class="block px-3 py-2 text-sm hover:bg-slate-50" href="#"
+                       onclick="navigator.clipboard.writeText('{{ request.host_url.rstrip('/') + url_for('open_watchlist', wid=w.id) }}'); this.closest('.menuPanel').classList.add('hidden'); return false;">
+                      Copy link
+                    </a>
+                    <a class="block px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                       href="{{ url_for('delete_single', wid=w.id) }}"
+                       onclick="return confirm('Delete this watchlist?')">Delete</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="p-4 text-sm text-slate-500">No lists yet.</div>
+    {% endif %}
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 p-6 overflow-y-auto">
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="mb-4">
+        {% for m in messages %}
+          <div class="rounded-md bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 text-sm">{{ m }}</div>
+        {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Create / Run -->
+      <div class="lg:col-span-1" id="create">
+        <form method="post" action="{{ url_for('submit') }}" class="bg-white rounded-xl shadow p-4 space-y-3">
+          <h2 class="text-base font-semibold mb-1">Create / run a watch</h2>
+          <label class="text-sm font-medium">Name (optional)</label>
+          <input name="name" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., Core Servers"
+                 value="{{ current.name if current else '' }}"/>
+
+          <label class="text-sm font-medium">CPEs (comma-separated)</label>
+          <textarea id="cpesField" name="cpes" rows="4" class="w-full border rounded-lg px-3 py-2"
+                    placeholder="cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:x64:*, cpe:2.3:o:canonical:ubuntu_linux:*:*:*:*:*:*:*">{{ current.cpes|join(', ') if current else '' }}</textarea>
+
+          <div class="flex items-center gap-2">
+            <input id="insecure" name="insecure" type="checkbox" class="h-4 w-4" {% if current and current.insecure %}checked{% endif %}>
+            <label for="insecure" class="text-sm">Skip TLS verification (insecure)</label>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <button name="action" value="run_daily" class="px-3 py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800"
+                    title="Scans last 24 hours for each CPE">Scan last 24 hours</button>
+            <button name="action" value="run_90d" class="px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500"
+                    title="Backfill scan for last 90 days">Scan last 90 days (backfill)</button>
+            <button name="action" value="save_only" class="px-3 py-2 rounded-lg bg-slate-200 hover:bg-slate-300">Save only</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Filters + Details + Table -->
+      <div class="lg:col-span-2">
+        {% if results is not none %}
+          <!-- Safe JSON payload -->
+          <script id="DATA" type="application/json">{{ results|tojson }}</script>
+
+          <div id="stickyBox">
+            <!-- Filters -->
+            <div id="filtersBox" class="bg-white rounded-xl shadow p-4 mb-3 flex flex-wrap gap-3 items-end">
+              <div>
+                <label class="text-xs text-slate-500">Search</label>
+                <input id="f_text" class="border rounded px-2 py-1" placeholder="CVE, text, CPE">
+              </div>
+              <div>
+                <label class="text-xs text-slate-500">Severity</label>
+                <select id="f_sev" class="border rounded px-2 py-1">
+                  <option value="">All</option>
+                  <option>Critical</option><option>High</option><option>Medium</option><option>Low</option><option>None</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs text-slate-500">Min score</label>
+                <input id="f_score" type="number" min="0" max="10" step="0.1" class="border rounded px-2 py-1 w-24" placeholder="e.g. 7.0">
+              </div>
+              <label class="flex items-center gap-2">
+                <input id="f_kev" type="checkbox" class="h-4 w-4"><span class="text-sm">KEV only</span>
+              </label>
+              <button id="f_clear" class="ml-auto text-sm px-2 py-1 border rounded">Clear</button>
+            </div>
+
+            <!-- CPE Builder -->
+            <div class="bg-white rounded-xl shadow p-4 mb-3">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-semibold">CPE 2.3 Builder</h3>
+                <button id="builderToggle" class="text-xs text-indigo-700 underline">Hide/Show</button>
+              </div>
+              <div id="builderBody" class="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div><label class="text-xs text-slate-500">Part</label>
+                  <select id="b_part" class="w-full border rounded px-2 py-1">
+                    <option value="a">a (application)</option>
+                    <option value="o" selected>o (operating system)</option>
+                    <option value="h">h (hardware)</option>
+                  </select>
+                </div>
+                <div><label class="text-xs text-slate-500">Vendor</label><input id="b_vendor" class="w-full border rounded px-2 py-1" placeholder="canonical"></div>
+                <div><label class="text-xs text-slate-500">Product</label><input id="b_product" class="w-full border rounded px-2 py-1" placeholder="ubuntu_linux"></div>
+                <div><label class="text-xs text-slate-500">Version</label><input id="b_version" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div><label class="text-xs text-slate-500">Update</label><input id="b_update" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div><label class="text-xs text-slate-500">Edition</label><input id="b_edition" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div><label class="text-xs text-slate-500">Language</label><input id="b_language" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div><label class="text-xs text-slate-500">SW Edition</label><input id="b_sw" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div><label class="text-xs text-slate-500">Target SW</label><input id="b_tsw" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div><label class="text-xs text-slate-500">Target HW</label><input id="b_thw" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div><label class="text-xs text-slate-500">Other</label><input id="b_other" class="w-full border rounded px-2 py-1" placeholder="*"></div>
+                <div class="col-span-full flex flex-wrap items-center gap-2">
+                  <button id="b_build" class="px-2 py-1 border rounded">Build CPE</button>
+                  <code id="b_output" class="text-xs bg-slate-100 px-2 py-1 rounded">cpe:2.3:o:*:*:*:*:*:*:*:*:*:*:*</code>
+                  <button id="b_add" class="ml-auto px-2 py-1 rounded bg-slate-900 text-white">Add to CPEs field</button>
+                </div>
+                <div class="col-span-full text-xs text-slate-500">
+                  Tip: leave fields empty to use <code>*</code>. Special chars <code>:</code> and <code>\</code> are auto-escaped.
+                </div>
+              </div>
+            </div>
+
+            <!-- Details panel -->
+            <div class="bg-white rounded-xl shadow mb-3 p-4" id="detailPanel" hidden>
+              <div class="flex items-center justify-between mb-2">
+                <div>
+                  <div class="text-lg font-semibold" id="d_cve"></div>
+                  <div class="text-xs text-slate-500" id="d_meta"></div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button id="btnPrev" class="px-2 py-1 border rounded">&larr; Prev</button>
+                  <button id="btnNext" class="px-2 py-1 border rounded">Next &rarr;</button>
+                  <a id="d_link" target="_blank" class="px-2 py-1 rounded bg-slate-900 text-white">Open on NVD</a>
+                </div>
+              </div>
+              <div class="prose max-w-none">
+                <p id="d_desc" class="whitespace-pre-wrap"></p>
+                <div id="d_cwes" class="text-sm text-slate-600"></div>
+                <div id="d_refs" class="mt-2 text-sm">
+                  <div class="font-medium">References</div>
+                  <ul id="d_refs_list" class="list-disc pl-5"></ul>
+                </div>
+              </div>
+            </div>
+          </div><!-- /stickyBox -->
+
+          <!-- Results -->
+          <div class="bg-white rounded-xl shadow">
+            <div class="px-4 py-3 border-b flex items-center justify-between">
+              <div>
+                <div class="text-base font-semibold">Results (<span id="resCount">{{ results|length }}</span>)</div>
+                <div class="text-xs text-slate-500">Window: {{ window_label }} • Click a row to open details above</div>
+              </div>
+              <div class="text-xs text-slate-500">Click headers to sort</div>
+            </div>
+            <div class="overflow-x-auto">
+              <table id="resTable" class="min-w-full text-sm">
+                <thead class="bg-slate-50 sticky">
+                  <tr class="text-left">
+                    <th class="px-4 py-2 sortable" data-k="cve">CVE</th>
+                    <th class="px-4 py-2">KEV</th>
+                    <th class="px-4 py-2 sortable" data-k="sev">Severity</th>
+                    <th class="px-4 py-2 sortable" data-k="score">Score</th>
+                    <th class="px-4 py-2 sortable" data-k="pub">Published</th>
+                    <th class="px-4 py-2 sortable" data-k="mod">Last Modified</th>
+                    <th class="px-4 py-2">Matched CPE</th>
+                  </tr>
+                </thead>
+                <tbody id="resBody"></tbody>
+              </table>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Shared scripts live at the end so DOM is ready -->
+<script>
+  // ----- Sidebar: search / select / bulk delete -----
+  (function(){
+    const wlList       = document.getElementById('wlList');
+    const wlSearch     = document.getElementById('wlSearch');
+    const selectModeBtn= document.getElementById('selectMode');
+    const wlSelectAll  = document.getElementById('wlSelectAll');
+    const bulkIds      = document.getElementById('bulkIds');
+    const bulkDelete   = document.getElementById('bulkDelete');
+
+    if (!wlList) return;
+
+    let manageMode = false;
+    const rows = () => Array.from(wlList.querySelectorAll(':scope > li'));
+    const visibleRows = () => rows().filter(li => li.style.display !== 'none');
+
+    function updateBulkState(){
+      const visBoxes = visibleRows().map(li => li.querySelector('.wlbox')).filter(Boolean);
+      const ids = visBoxes.filter(cb => cb.checked).map(cb => cb.value);
+      bulkIds.value = ids.join(',');
+      bulkDelete.disabled = ids.length === 0;
+      wlSelectAll.checked = (visBoxes.length>0) && visBoxes.every(cb=>cb.checked);
+      wlSelectAll.indeterminate = (ids.length>0 && !wlSelectAll.checked);
+    }
+
+    function setManage(on){
+      manageMode = on;
+      selectModeBtn.textContent = on ? 'Done' : 'Select';
+      wlSelectAll.disabled = !on;
+
+      rows().forEach(li=>{
+        const cb = li.querySelector('.wlbox');
+        const link = li.querySelector('.wlLink');
+        if (cb) cb.classList.toggle('hidden', !on);
+        if (link) link.classList.toggle('pointer-events-none', on);
+      });
+
+      if (!on){
+        wlList.querySelectorAll('.wlbox').forEach(cb => cb.checked = false);
+        wlSelectAll.checked = false;
+        wlSelectAll.indeterminate = false;
+        bulkIds.value = '';
+      }
+      updateBulkState();
+    }
+
+    function applyFilter(){
+      const q = (wlSearch.value || '').trim().toLowerCase();
+      rows().forEach(li=>{
+        const key = (li.querySelector('.wlLink')?.dataset.key || '');
+        li.style.display = q && !key.includes(q) ? 'none' : '';
+      });
+      updateBulkState();
+    }
+
+    selectModeBtn?.addEventListener('click', (e)=>{ e.preventDefault(); setManage(!manageMode); });
+    wlSelectAll?.addEventListener('change', ()=>{
+      visibleRows().forEach(li => { const cb = li.querySelector('.wlbox'); if (cb) cb.checked = wlSelectAll.checked; });
+      updateBulkState();
+    });
+    wlList.addEventListener('change', (e)=>{
+      if (e.target instanceof HTMLInputElement && e.target.classList.contains('wlbox')) updateBulkState();
+    });
+    wlList.addEventListener('click', (e)=>{
+      if (!manageMode) return;
+      const block = e.target.closest('[data-no-toggle], .menuPanel, a, button, input');
+      if (block) return;
+      const li = e.target.closest('li');
+      if (!li) return;
+      const cb = li.querySelector('.wlbox');
+      if (cb){ cb.checked = !cb.checked; updateBulkState(); }
+    });
+    document.addEventListener('click', (e)=>{
+      document.querySelectorAll('.menuPanel').forEach(p=>{
+        if (!p.contains(e.target) && p.previousElementSibling !== e.target) p.classList.add('hidden');
+      });
+    });
+    wlSearch?.addEventListener('input', applyFilter);
+
+    setManage(false);
+    applyFilter();
+  })();
+</script>
+
+{% if results is not none %}
+<script>
+  // ----- Results: safe JSON parse + render/filter/sort/details -----
+  let ORIGINAL = [];
+  try {
+    const dataEl = document.getElementById('DATA');
+    ORIGINAL = dataEl ? JSON.parse(dataEl.textContent || '[]') : [];
+  } catch (e) {
+    console.error('Failed to parse results JSON:', e);
+    ORIGINAL = [];
+  }
+
+  let filtered = [...ORIGINAL];
+  let sortKey = 'mod', sortDir = -1;
+  let currentIdx = -1;
+
+  function renderTable(list){
+    const tb = document.getElementById('resBody');
+    if (!tb) return;
+    tb.innerHTML = '';
+    list.forEach((r, idx)=>{
+      const sev = r.severity || 'None';
+      const score = (r.score ?? '');
+      const tr = document.createElement('tr');
+      tr.className = 'border-t hover:bg-slate-50 cursor-pointer';
+      tr.dataset.idx = idx;
+      tr.innerHTML = `
+        <td class="px-4 py-2 text-indigo-700 underline">${r.cve}</td>
+        <td class="px-4 py-2">${r.kev ? '✅' : '—'}</td>
+        <td class="px-4 py-2"><span class="badge sev-${sev}">${sev}</span></td>
+        <td class="px-4 py-2">${score}</td>
+        <td class="px-4 py-2">${r.published || ''}</td>
+        <td class="px-4 py-2">${r.lastModified || ''}</td>
+        <td class="px-4 py-2 truncate max-w-[14rem]" title="${r.matched_cpe_query || ''}">${r.matched_cpe_query || ''}</td>`;
+      tr.addEventListener('click', ()=> { showDetails(idx); window.scrollTo({top:document.getElementById('stickyBox').offsetTop-8, behavior:'smooth'}); });
+      tb.appendChild(tr);
+    });
+    const rc = document.getElementById('resCount');
+    if (rc) rc.textContent = list.length;
+  }
+
+  function showDetails(idx){
+    const r = filtered[idx];
+    if (!r) return;
+    currentIdx = idx;
+    const panel = document.getElementById('detailPanel');
+    if (!panel) return;
+    panel.hidden = false;
+    const sev = r.severity || 'None';
+    const score = (r.score ?? '');
+    document.getElementById('d_cve').textContent = r.cve + (r.kev ? '  (KEV)' : '');
+    document.getElementById('d_meta').textContent = `Severity: ${sev}  •  Score: ${score}  •  Modified: ${r.lastModified || ''}`;
+    document.getElementById('d_desc').textContent = r.description || '(no description)';
+    document.getElementById('d_link').href = 'https://nvd.nist.gov/vuln/detail/' + r.cve;
+
+    const cwes = (r.cwes || []).join(', ');
+    document.getElementById('d_cwes').textContent = cwes ? ('CWE: ' + cwes) : '';
+
+    const ul = document.getElementById('d_refs_list');
+    ul.innerHTML = '';
+    (r.refs || []).forEach(ref => {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.textContent = (ref.tags && ref.tags.length ? ref.tags.join(', ') : (ref.source || 'ref'));
+      a.href = ref.url || '#';
+      a.target = '_blank';
+      a.className = 'text-indigo-700 underline';
+      li.appendChild(a);
+      ul.appendChild(li);
+    });
+  }
+
+  function applyFilters(){
+    const q = (document.getElementById('f_text').value || '').toLowerCase();
+    const sev = document.getElementById('f_sev').value;
+    const minScoreStr = document.getElementById('f_score').value;
+    const kevOnly = document.getElementById('f_kev').checked;
+    const minScore = minScoreStr ? parseFloat(minScoreStr) : NaN;
+
+    filtered = ORIGINAL.filter(r => {
+      const hay = (r.cve + ' ' + (r.description || '') + ' ' + (r.matched_cpe_query || '')).toLowerCase();
+      if (q && !hay.includes(q)) return false;
+      const rsev = (r.severity || 'None');
+      if (sev && rsev !== sev) return false;
+      const sc = (r.score === null || r.score === undefined) ? NaN : parseFloat(r.score);
+      if (!isNaN(minScore) && (isNaN(sc) || sc < minScore)) return false;
+      if (kevOnly && !r.kev) return false;
+      return true;
+    });
+    sortAndRender();
+    if (currentIdx >= 0 && currentIdx < filtered.length) showDetails(currentIdx);
+  }
+
+  function sortAndRender(){
+    const dir = sortDir;
+    const key = sortKey;
+    filtered.sort((a,b)=>{
+      const A = (k)=>({cve:a.cve, sev:(a.severity||'None'), score:(a.score??-1), pub:(a.published||''), mod:(a.lastModified||'')})[k];
+      const B = (k)=>({cve:b.cve, sev:(b.severity||'None'), score:(b.score??-1), pub:(b.published||''), mod:(b.lastModified||'')})[k];
+      const va=A(key), vb=B(key);
+      if (va<vb) return -1*dir;
+      if (va>vb) return  1*dir;
+      return 0;
+    });
+    renderTable(filtered);
+  }
+
+  // Wire up filters/sort/keys after DOM is ready (we're at the end of body already)
+  (function(){
+    const txt = document.getElementById('f_text');
+    const sev = document.getElementById('f_sev');
+    const sc  = document.getElementById('f_score');
+    const kev = document.getElementById('f_kev');
+    const clr = document.getElementById('f_clear');
+
+    if (txt) txt.addEventListener('input', applyFilters);
+    if (sev) sev.addEventListener('change', applyFilters);
+    if (sc)  sc.addEventListener('input', applyFilters);
+    if (kev) kev.addEventListener('change', applyFilters);
+    if (clr) clr.addEventListener('click', (e)=>{e.preventDefault();
+      if (txt) txt.value=''; if (sev) sev.value=''; if (sc) sc.value=''; if (kev) kev.checked=false; applyFilters();
+    });
+
+    document.querySelectorAll('th.sortable').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const k = th.dataset.k;
+        if (sortKey === k) { sortDir = -sortDir; }
+        else { sortKey = k; sortDir = (k==='score' || k==='mod' || k==='pub') ? -1 : 1; }
+        sortAndRender();
+      });
+    });
+
+    const prev = document.getElementById('btnPrev');
+    const next = document.getElementById('btnNext');
+    if (prev) prev.addEventListener('click', ()=>{ if (currentIdx>0) showDetails(currentIdx-1); });
+    if (next) next.addEventListener('click', ()=>{ if (currentIdx<filtered.length-1) showDetails(currentIdx+1); });
+    window.addEventListener('keydown', (e)=> {
+      const panel = document.getElementById('detailPanel');
+      if (!panel || panel.hidden) return;
+      if (e.key === 'ArrowLeft' && currentIdx>0) showDetails(currentIdx-1);
+      if (e.key === 'ArrowRight' && currentIdx<filtered.length-1) showDetails(currentIdx+1);
+    });
+
+    // Initial render
+    sortKey='mod'; sortDir=-1;
+    sortAndRender();
+  })();
+</script>
+{% endif %}
+</body></html>"""
 
 
-logger = logging.getLogger(__name__)
-
-
-QUERY_PARAM_KEYS = (
-    "cveId",
-    "cweId",
-    "cvssV3Severity",
-    "cvssV4Severity",
-    "cvssV3Metrics",
-    "cvssV4Metrics",
-)
-
-
-def create_app(args) -> Flask:
-    """Create and configure the Flask application."""
-
-    app = Flask(
-        __name__,
-        static_folder="static",
-        template_folder="templates",
-    )
+def create_app(args):
+    app = Flask(__name__)
     app.secret_key = "dev-" + uuid.uuid4().hex
-    app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
 
-    def wants_json_response() -> bool:
-        return request.path.startswith("/api/")
+    def read_watchlists():
+        wl = load_json(WATCHLISTS_FILE, {"lists": []})
+        wl["lists"] = wl.get("lists", [])
+        return wl
 
-    @app.errorhandler(HTTPException)
-    def _handle_http_exception(exc: HTTPException):
-        if wants_json_response():
-            logger.warning("API error on %s: %s", request.path, exc.description)
-            return json_response({"error": exc.description or exc.name}, status=exc.code)
-        return exc
-
-    @app.errorhandler(Exception)
-    def _handle_generic_exception(exc: Exception):
-        logger.exception("Unhandled error on %s", request.path)
-        if wants_json_response():
-            return json_response({"error": "Internal server error"}, status=500)
-        raise exc
-
-    # ------------------------------------------------------------------ helpers
-
-    def _csrf_token() -> str:
-        token = session.get("_csrf_token")
-        if not token:
-            token = secrets.token_hex(16)
-            session["_csrf_token"] = token
-        return token
-
-    app.jinja_env.globals["csrf_token"] = _csrf_token
-
-    @app.before_request
-    def _csrf_protect() -> None:
-        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-            token = request.headers.get("X-CSRF-Token")
-            if not token and request.form:
-                token = request.form.get("csrf_token")
-            if not token or token != session.get("_csrf_token"):
-                abort(400, "Invalid CSRF token")
-
-    def read_watchlists() -> Dict[str, Any]:
-        raw = load_json(WATCHLISTS_FILE, {})
-        migrated = migrate_watchlists(raw)
-        if migrated != raw:
-            save_json(WATCHLISTS_FILE, migrated)
-        return migrated
-
-    def write_watchlists(data: Dict[str, Any]) -> None:
-        data["projects"].sort(key=lambda proj: proj.get("order", 0))
-        data["lists"].sort(key=lambda item: (item.get("projectId"), item.get("order", 0)))
+    def write_watchlists(data):
         save_json(WATCHLISTS_FILE, data)
 
-    def find_project(data: Dict[str, Any], project_id: str) -> Optional[Dict[str, Any]]:
-        return next((p for p in data.get("projects", []) if p["id"] == project_id), None)
-
-    def find_watchlist(data: Dict[str, Any], watch_id: str) -> Optional[Dict[str, Any]]:
-        return next((w for w in data.get("lists", []) if w["id"] == watch_id), None)
-
-    def resequence_project(data: Dict[str, Any], project_id: str) -> None:
-        items = [w for w in data.get("lists", []) if w["projectId"] == project_id]
-        items.sort(key=lambda entry: entry.get("order", 0))
-        for idx, item in enumerate(items):
-            item["order"] = idx
-
-    def parse_cpes(raw: Any) -> List[str]:
-        values: List[str] = []
-        if isinstance(raw, str):
-            pieces = [seg.strip() for seg in raw.split(",")]
-        elif isinstance(raw, list):
-            pieces = []
-            for entry in raw:
-                if isinstance(entry, str):
-                    pieces.extend([seg.strip() for seg in entry.split(",")])
-        else:
-            pieces = []
-        for item in pieces:
-            if item and item not in values:
-                values.append(item)
-        return values
-
-    def validate_cpes(cpes: List[str], is_vulnerable: bool) -> List[str]:
-        warnings: List[str] = []
-        if not cpes:
-            abort(400, "At least one CPE is required")
-        for cpe in cpes:
-            if not is_valid_cpe(cpe):
-                abort(400, f"Invalid CPE string: {cpe}")
-            if is_vulnerable and not has_specific_version(cpe):
-                warning = "Using isVulnerable=true with wildcard versions may return 400 from NVD."
-                if warning not in warnings:
-                    warnings.append(warning)
-        return warnings
-
-    def apply_watchlist_changes(
-        data: Dict[str, Any],
-        entry: Dict[str, Any],
-        payload: Dict[str, Any],
-    ) -> List[str]:
-        warnings: List[str] = []
-        name = payload.get("name")
-        if name is not None:
-            entry["name"] = name.strip() or entry.get("name") or "Untitled"
-
-        if "projectId" in payload:
-            project_id = payload["projectId"]
-            if project_id and not find_project(data, project_id):
-                abort(400, "Unknown project")
-            if project_id:
-                entry["projectId"] = project_id
-
-        options_payload = dict(payload.get("options") or {})
-        current_options = dict(entry.get("options") or {})
-        api_key_val = options_payload.pop("apiKey", None)
-        if api_key_val is not None:
-            if isinstance(api_key_val, str):
-                api_key_val = api_key_val.strip()
-            if api_key_val == "":
-                current_options["apiKey"] = None
-            elif api_key_val is not None:
-                current_options["apiKey"] = api_key_val
-        options_payload.pop("hasApiKey", None)
-        for key, value in options_payload.items():
-            current_options[key] = value
-        entry["options"] = normalize_watchlist_options(current_options)
-
-        if "cpes" in payload:
-            cpes = parse_cpes(payload["cpes"])
-            warnings.extend(validate_cpes(cpes, entry["options"].get("isVulnerable", False)))
-            entry["cpes"] = cpes
-        else:
-            warnings.extend(validate_cpes(entry.get("cpes", []), entry["options"].get("isVulnerable", False)))
-
-        if "order" in payload:
-            try:
-                entry["order"] = int(payload["order"])
-            except (TypeError, ValueError):
-                pass
-
-        return warnings
-
-    def serialize_watchlist(entry: Dict[str, Any]) -> Dict[str, Any]:
-        options = dict(entry.get("options") or {})
-        has_key = bool(options.get("apiKey"))
-        options_safe = dict(options)
-        options_safe.pop("apiKey", None)
-        options_safe["hasApiKey"] = has_key
-        return {
-            "id": entry["id"],
-            "name": entry["name"],
-            "projectId": entry["projectId"],
-            "cpes": entry.get("cpes", []),
-            "order": entry.get("order", 0),
-            "options": options_safe,
-        }
-
-    def serialize_project(entry: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "id": entry["id"],
-            "name": entry["name"],
-            "order": entry.get("order", 0),
-        }
-
-    def build_session_for(entry: Dict[str, Any]):
-        options = normalize_watchlist_options(entry.get("options"))
-        session_obj = build_session(
-            https_proxy=options.get("httpsProxy") or args.https_proxy or os.environ.get("HTTPS_PROXY"),
-            http_proxy=options.get("httpProxy") or args.http_proxy or os.environ.get("HTTP_PROXY"),
-            ca_bundle=options.get("caBundle") or args.ca_bundle,
-            insecure=bool(options.get("insecure")) or args.insecure,
-            timeout=options.get("timeout") or args.timeout,
-        )
-        state_all = load_json(STATE_FILE, {})
-        state_key = f"nvd:{entry['projectId']}:{hash_for_cpes(entry['cpes'])}"
-        api_key = options.get("apiKey") or args.nvd_api_key
-        return session_obj, state_all, state_key, options, api_key
-
-    def compute_window(window: str) -> Tuple[str, Any]:
-        win = (window or "24h").lower()
-        now = now_utc()
-        if win == "24h":
-            return "last 24 hours", now - timedelta(hours=DAILY_LOOKBACK_HOURS)
-        if win == "120d":
-            return "last 120 days", now - timedelta(days=EXTENDED_LOOKBACK_DAYS)
-        return "last 90 days", now - timedelta(days=LONG_BACKFILL_DAYS)
-
-    def run_watch(entry: Dict[str, Any], window: str):
-        label, since = compute_window(window)
-        session_obj, state_all, state_key, options, api_key = build_session_for(entry)
-        query_params: Dict[str, Any] = {}
-        for key in QUERY_PARAM_KEYS:
-            value = options.get(key)
-            if value:
-                query_params[key] = value
-        if options.get("hasKev"):
-            query_params["hasKev"] = "true"
-        logger.info(
-            "Running watchlist %s (%s) for %s",
-            entry.get("id"),
-            entry.get("name"),
-            label,
-        )
-        try:
-            results, updated_entry, issues = run_scan(
-                cpes=entry["cpes"],
-                state_all=state_all,
-                state_key=state_key,
-                session=session_obj,
-                insecure=bool(options.get("insecure")) or args.insecure,
-                api_key=api_key,
-                since=since,
-                no_rejected=options.get("noRejected", True),
-                kev_only=False,
-                min_score=None,
-                is_vulnerable=options.get("isVulnerable", False),
-                extra_params=query_params,
-            )
-        except Exception as exc:  # pragma: no cover - defensive guard
-            logger.exception(
-                "Scan failed for watchlist %s (%s)", entry.get("id"), entry.get("name")
-            )
-            abort(502, f"Scan failed: {exc}")
-        if updated_entry.get("per_cpe"):
-            state_all[state_key] = updated_entry
-            proj_state = state_all.setdefault("projects", {})
-            proj_state[entry["projectId"]] = iso(now_utc())
-            save_json(STATE_FILE, state_all)
-        detailed_issues: List[Dict[str, Any]] = []
-        for issue in issues:
-            item = {
-                "cpe": issue.get("cpe"),
-                "message": issue.get("message") or "Unknown error",
-                "watchlistId": entry.get("id"),
-                "watchlistName": entry.get("name"),
-                "window": label,
-            }
-            detailed_issues.append(item)
-            logger.warning(
-                "Watchlist %s (%s) encountered an issue for %s: %s",
-                entry.get("id"),
-                entry.get("name"),
-                item.get("cpe"),
-                item.get("message"),
-            )
-        return results, label, detailed_issues
-
-    def bootstrap_payload(
-        data: Dict[str, Any],
-        current_id: Optional[str] = None,
-        results=None,
-        window_label: str = "",
-        issues: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        return {
-            "projects": [serialize_project(p) for p in data.get("projects", [])],
-            "lists": [serialize_watchlist(w) for w in data.get("lists", [])],
-            "currentWatchId": current_id,
-            "results": results,
-            "windowLabel": window_label,
-            "csrfToken": _csrf_token(),
-            "issues": issues or [],
-        }
-
-    def json_response(data: Dict[str, Any], status: int = 200):
-        resp = jsonify(data)
-        resp.status_code = status
-        return resp
-
-    # -------------------------------------------------------------------- routes
-
     @app.get("/favicon.ico")
-    def favicon() -> Tuple[str, int]:
-        return "", 204
+    def favicon():
+        return ("", 204)
 
     @app.get("/")
     def index():
-        data = read_watchlists()
-        watch_id = request.args.get("watch")
-        results = None
-        label = ""
-        issues: List[Dict[str, Any]] = []
-        if watch_id:
-            entry = find_watchlist(data, watch_id)
-            if entry:
-                results, label, issues = run_watch(entry, request.args.get("win", "24h"))
-        return render_template(
-            "index.html",
-            bootstrap=bootstrap_payload(
-                data,
-                watch_id if results else None,
-                results,
-                label,
-                issues,
-            ),
-        )
+        wl = read_watchlists()
+        return render_template_string(TEMPLATE, watchlists=wl["lists"], current=None, results=None, window_label="")
 
-    @app.get("/api/watchlists")
-    def api_watchlists():
-        data = read_watchlists()
-        return json_response({
-            "projects": [serialize_project(p) for p in data.get("projects", [])],
-            "lists": [serialize_watchlist(w) for w in data.get("lists", [])],
-        })
+    @app.get("/open/<wid>")
+    def open_watchlist(wid):
+        wl = read_watchlists()
+        current = next((x for x in wl["lists"] if x["id"] == wid), None)
+        if not current:
+            flash("Watchlist not found.")
+            return redirect(url_for("index"))
+        return render_template_string(TEMPLATE, watchlists=wl["lists"], current=current, results=None, window_label="")
 
-    @app.post("/api/projects")
-    def api_create_project():
-        data = read_watchlists()
-        payload = request.get_json(force=True) or {}
-        name = (payload.get("name") or "New Project").strip() or "New Project"
-        order = max((p.get("order", 0) for p in data.get("projects", [])), default=-1) + 1
-        project = {"id": uuid.uuid4().hex, "name": name, "order": order}
-        data.setdefault("projects", []).append(project)
-        write_watchlists(data)
-        return json_response({"project": serialize_project(project)}, status=201)
+    @app.post("/delete")
+    def delete_lists():
+        ids = (request.form.get("ids") or "").split(",")
+        ids = [x for x in ids if x]
+        wl = read_watchlists()
+        before = len(wl["lists"])
+        wl["lists"] = [x for x in wl["lists"] if x["id"] not in ids]
+        write_watchlists(wl)
+        flash(f"Deleted {before - len(wl['lists'])} watchlist(s).")
+        return redirect(url_for("index"))
 
-    @app.patch("/api/projects/<pid>")
-    def api_rename_project(pid: str):
-        data = read_watchlists()
-        project = find_project(data, pid)
-        if not project:
-            abort(404, "Project not found")
-        payload = request.get_json(force=True) or {}
-        name = payload.get("name")
-        if name is None:
-            abort(400, "Missing name")
-        project["name"] = name.strip() or project["name"]
-        write_watchlists(data)
-        return json_response({"project": serialize_project(project)})
+    @app.get("/delete/<wid>")
+    def delete_single(wid):
+        wl = read_watchlists()
+        wl["lists"] = [x for x in wl["lists"] if x["id"] != wid]
+        write_watchlists(wl)
+        flash("Deleted.")
+        return redirect(url_for("index"))
 
-    @app.delete("/api/projects/<pid>")
-    def api_delete_project(pid: str):
-        data = read_watchlists()
-        project = find_project(data, pid)
-        if not project:
-            abort(404, "Project not found")
-        if any(w for w in data.get("lists", []) if w["projectId"] == pid):
-            abort(400, "Cannot delete a non-empty project")
-        data["projects"] = [p for p in data["projects"] if p["id"] != pid]
-        if not data["projects"]:
-            data["projects"].append(default_project(order=0))
-        write_watchlists(data)
-        return json_response({"ok": True})
+    @app.get("/run/<wid>")
+    def run_watchlist(wid):
+        wl = read_watchlists()
+        current = next((x for x in wl["lists"] if x["id"] == wid), None)
+        if not current:
+            flash("Watchlist not found.")
+            return redirect(url_for("index"))
+        win = (request.args.get("win") or "24h").lower()
+        if win == "24h":
+            force_since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
+        else:
+            force_since = now_utc() - timedelta(days=LONG_BACKFILL_DAYS)
 
-    @app.get("/api/projects/<pid>/export")
-    def api_export_project(pid: str):
-        data = read_watchlists()
-        project = find_project(data, pid)
-        if not project:
-            abort(404, "Project not found")
-        lists = [serialize_watchlist(w) for w in data.get("lists", []) if w["projectId"] == pid]
-        body = json.dumps({"project": serialize_project(project), "lists": lists}, indent=2)
-        return Response(
-            body,
-            mimetype="application/json",
-            headers={"Content-Disposition": f'attachment; filename="project_{project["name"]}.json"'},
-        )
-
-    @app.post("/api/projects/<pid>/import")
-    def api_import_project(pid: str):
-        data = read_watchlists()
-        project = find_project(data, pid)
-        if not project:
-            abort(404, "Project not found")
-        payload = request.get_json(force=True) or {}
-        lists = payload.get("lists") or []
-        if not isinstance(lists, list):
-            abort(400, "Invalid payload")
-        existing = {w["name"].lower(): w for w in data.get("lists", []) if w["projectId"] == pid}
-        warnings: List[str] = []
-        for item in lists:
-            if not isinstance(item, dict):
-                continue
-            name = (item.get("name") or "Imported").strip() or "Imported"
-            target = existing.get(name.lower())
-            if target:
-                warnings.extend(apply_watchlist_changes(data, target, item))
-            else:
-                next_order = max(
-                    (w.get("order", 0) for w in data.get("lists", []) if w["projectId"] == pid),
-                    default=-1,
-                ) + 1
-                new_entry = {
-                    "id": uuid.uuid4().hex,
-                    "name": name,
-                    "projectId": pid,
-                    "cpes": [],
-                    "options": normalize_watchlist_options({}),
-                    "order": next_order,
-                }
-                warnings.extend(apply_watchlist_changes(data, new_entry, item))
-                data["lists"].append(new_entry)
-        resequence_project(data, pid)
-        write_watchlists(data)
-        return json_response({
-            "projects": [serialize_project(p) for p in data.get("projects", [])],
-            "lists": [serialize_watchlist(w) for w in data.get("lists", [])],
-            "warnings": warnings,
-        })
-
-    @app.post("/api/watchlists")
-    def api_create_watchlist():
-        data = read_watchlists()
-        payload = request.get_json(force=True) or {}
-        project_id = payload.get("projectId") or (data.get("projects") or [default_project()])[0]["id"]
-        if not find_project(data, project_id):
-            abort(400, "Unknown project")
-        next_order = max(
-            (w.get("order", 0) for w in data.get("lists", []) if w["projectId"] == project_id),
-            default=-1,
-        ) + 1
-        entry = {
-            "id": uuid.uuid4().hex,
-            "name": (payload.get("name") or "New Watchlist").strip() or "New Watchlist",
-            "projectId": project_id,
-            "cpes": [],
-            "options": normalize_watchlist_options({}),
-            "order": next_order,
-        }
-        warnings = apply_watchlist_changes(data, entry, payload)
-        data.setdefault("lists", []).append(entry)
-        resequence_project(data, project_id)
-        write_watchlists(data)
-        return json_response({"watchlist": serialize_watchlist(entry), "warnings": warnings}, status=201)
-
-    @app.put("/api/watchlists/<wid>")
-    def api_update_watchlist(wid: str):
-        data = read_watchlists()
-        entry = find_watchlist(data, wid)
-        if not entry:
-            abort(404, "Watchlist not found")
-        payload = request.get_json(force=True) or {}
-        old_project = entry["projectId"]
-        warnings = apply_watchlist_changes(data, entry, payload)
-        new_project = entry["projectId"]
-        resequence_project(data, old_project)
-        if new_project != old_project:
-            resequence_project(data, new_project)
-        write_watchlists(data)
-        return json_response({"watchlist": serialize_watchlist(entry), "warnings": warnings})
-
-    @app.delete("/api/watchlists/<wid>")
-    def api_delete_watchlist(wid: str):
-        data = read_watchlists()
-        entry = find_watchlist(data, wid)
-        if not entry:
-            abort(404, "Watchlist not found")
-        project_id = entry["projectId"]
-        data["lists"] = [w for w in data["lists"] if w["id"] != wid]
-        resequence_project(data, project_id)
-        write_watchlists(data)
-        return json_response({"ok": True})
-
-    @app.post("/api/watchlists/reorder")
-    def api_reorder_watchlists():
-        data = read_watchlists()
-        payload = request.get_json(force=True) or {}
-        project_id = payload.get("projectId")
-        order_ids = payload.get("order") or []
-        if not project_id or not isinstance(order_ids, list):
-            abort(400, "Invalid payload")
-        if not find_project(data, project_id):
-            abort(400, "Unknown project")
-        for idx, wid in enumerate(order_ids):
-            entry = find_watchlist(data, wid)
-            if entry and entry["projectId"] == project_id:
-                entry["order"] = idx
-        resequence_project(data, project_id)
-        write_watchlists(data)
-        return json_response(
-            {
-                "projects": [serialize_project(p) for p in data.get("projects", [])],
-                "lists": [serialize_watchlist(w) for w in data.get("lists", [])],
-            }
-        )
-
-    @app.post("/api/run")
-    def api_run_watch():
-        payload = request.get_json(force=True) or {}
-        wid = payload.get("watchlistId")
-        window = payload.get("window", "24h")
-        data = read_watchlists()
-        entry = find_watchlist(data, wid)
-        if not entry:
-            abort(404, "Watchlist not found")
-        results, label, issues = run_watch(entry, window)
-        return json_response({"results": results, "windowLabel": label, "issues": issues})
-
-    @app.get("/api/cpe_suggest")
-    def api_cpe_suggest():
-        vendor = (request.args.get("vendor") or "").strip()
-        product = (request.args.get("product") or "").strip()
-        version = (request.args.get("version") or "").strip()
-        keyword = (request.args.get("keyword") or "").strip()
-        part = (request.args.get("part") or "*").strip() or "*"
-        limit = min(max(int(request.args.get("limit", 40)), 1), 200)
-        params: Dict[str, Any] = {"resultsPerPage": limit}
-        if vendor or product or version:
-            def esc(text: str) -> str:
-                return text.replace("\\", "\\\\").replace(":", "\\:")
-            v = esc(vendor) if vendor else "*"
-            p = esc(product) if product else "*"
-            ver = esc(version) if version else "*"
-            params["cpeMatchString"] = f"cpe:2.3:{part}:{v}:{p}:{ver}:*:*:*:*:*:*"
-        if keyword:
-            params["keywordSearch"] = keyword
-        session_obj = build_session(
+        session = build_session(
             https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
             http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
             ca_bundle=args.ca_bundle,
-            insecure=args.insecure,
+            insecure=current.get("insecure", False) or args.insecure,
             timeout=args.timeout,
         )
-        items: List[Dict[str, Any]] = []
-        seen: set[str] = set()
-        for product_entry in iter_cpe_products(
-            session_obj,
-            api_key=args.nvd_api_key,
-            insecure=args.insecure,
-            params=params,
-        ):
-            cpe_info = product_entry.get("cpe") or {}
-            name = cpe_info.get("cpeName")
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            items.append(
-                {
-                    "cpeName": name,
-                    "titles": cpe_info.get("titles") or [],
-                    "deprecated": bool(cpe_info.get("deprecated")),
-                }
-            )
-            if len(items) >= limit:
-                break
-        return json_response({"items": items})
+        state_all = load_json(STATE_FILE, {})
+        state_key = f"nvd:{hash_for_cpes(current['cpes'])}"
+        results, updated_entry = run_scan(
+            cpes=current["cpes"], state_all=state_all, state_key=state_key,
+            session=session, insecure=current.get("insecure", False) or args.insecure,
+            api_key=args.nvd_api_key, since=force_since, no_rejected=True, kev_only=False,
+        )
+        if updated_entry.get("per_cpe"):
+            state_all[state_key] = updated_entry
+            save_json(STATE_FILE, state_all)
 
-    @app.get("/export/<wid>.json")
-    def export_json(wid: str):
-        data = read_watchlists()
-        entry = find_watchlist(data, wid)
-        if not entry:
-            return Response("Not found", status=404)
-        window = request.args.get("win", "24h")
-        results, _, issues = run_watch(entry, window)
-        if issues and not results:
-            return Response(
-                "Scan failed: see server logs for details",
-                status=502,
-                mimetype="text/plain",
-            )
-        body = json.dumps(results, indent=2, ensure_ascii=False)
-        return Response(
-            body,
-            mimetype="application/json",
-            headers={"Content-Disposition": f'attachment; filename="{entry["name"]}_{window}.json"'},
+        window_label = "last 24 hours" if win == "24h" else "last 90 days"
+        return render_template_string(
+            TEMPLATE,
+            watchlists=wl["lists"],
+            current=current,
+            results=results,
+            window_label=window_label,
         )
 
-    @app.get("/export/<wid>.csv")
-    def export_csv(wid: str):
-        data = read_watchlists()
-        entry = find_watchlist(data, wid)
-        if not entry:
+    @app.post("/submit")
+    def submit():
+        name = (request.form.get("name") or "").strip()
+        cpes_raw = (request.form.get("cpes") or "").strip()
+        action = request.form.get("action")
+        insecure_flag = bool(request.form.get("insecure"))
+
+        if not cpes_raw:
+            flash("Please provide at least one CPE (comma-separated).")
+            return redirect(url_for("index"))
+
+        cpes = [c.strip() for c in cpes_raw.split(",") if c.strip()]
+        if not cpes:
+            flash("Could not parse any CPEs.")
+            return redirect(url_for("index"))
+
+        wl = read_watchlists()
+        wid = str(uuid.uuid4())
+        entry = {"id": wid, "name": name or f"List {len(wl['lists'])+1}", "cpes": cpes, "insecure": insecure_flag}
+        wl["lists"].insert(0, entry)
+        write_watchlists(wl)
+
+        if action == "save_only":
+            flash("Saved.")
+            return redirect(url_for("open_watchlist", wid=wid))
+        next_window = "24h" if action == "run_daily" else "90d"
+        return redirect(url_for("run_watchlist", wid=wid, win=next_window))
+
+    # --- Export helpers/endpoints ---
+    def _scan_for_export(wid: str, win: str):
+        wl = load_json(WATCHLISTS_FILE, {"lists": []})
+        current = next((x for x in wl["lists"] if x["id"] == wid), None)
+        if not current:
+            return None, None
+        if win == "24h":
+            force_since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
+        else:
+            force_since = now_utc() - timedelta(days=LONG_BACKFILL_DAYS)
+        session = build_session(
+            https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
+            http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
+            ca_bundle=args.ca_bundle,
+            insecure=current.get("insecure", False) or args.insecure,
+            timeout=args.timeout,
+        )
+        state_all = load_json(STATE_FILE, {})
+        state_key = f"nvd:{hash_for_cpes(current['cpes'])}"
+        results, updated_entry = run_scan(
+            cpes=current["cpes"], state_all=state_all, state_key=state_key,
+            session=session, insecure=current.get("insecure", False) or args.insecure,
+            api_key=args.nvd_api_key, since=force_since, no_rejected=True, kev_only=False,
+        )
+        if updated_entry.get("per_cpe"):
+            state_all[state_key] = updated_entry
+            save_json(STATE_FILE, state_all)
+        return current, results
+
+    @app.get("/export/<wid>.json")
+    def export_json(wid):
+        win = (request.args.get("win") or "24h").lower()
+        current, results = _scan_for_export(wid, win)
+        if not current:
             return Response("Not found", status=404)
-        window = request.args.get("win", "24h")
-        results, _, issues = run_watch(entry, window)
-        if issues and not results:
-            return Response(
-                "Scan failed: see server logs for details",
-                status=502,
-                mimetype="text/plain",
-            )
+        body = json.dumps(results, ensure_ascii=False, indent=2)
+        return Response(body, mimetype="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="{current["name"]}_{win}.json"'})
+
+    @app.get("/export/<wid>.csv")
+    def export_csv(wid):
+        win = (request.args.get("win") or "24h").lower()
+        current, results = _scan_for_export(wid, win)
+        if not current:
+            return Response("Not found", status=404)
         buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow([
-            "CVE",
-            "Severity",
-            "Score",
-            "Published",
-            "LastModified",
-            "MatchedCPE",
-            "KEV",
-            "CWEs",
-            "Description",
-        ])
-        for item in results:
-            writer.writerow(
+        w = csv.writer(buf)
+        w.writerow(
+            [
+                "CVE",
+                "Severity",
+                "Score",
+                "Published",
+                "LastModified",
+                "MatchedCPE",
+                "KEV",
+                "CWEs",
+                "Description",
+            ]
+        )
+        for r in results:
+            sev = r.get("severity", "")
+            score = r.get("score", "")
+            w.writerow(
                 [
-                    item.get("id", ""),
-                    item.get("cvssSeverity", ""),
-                    item.get("cvssScore", ""),
-                    item.get("published", ""),
-                    item.get("lastModified", ""),
-                    ";".join(item.get("matchedCPE", []) or []),
-                    "yes" if item.get("kev") else "",
-                    ";".join(item.get("cwes", [])),
-                    (item.get("description", "") or "").replace("\n", " ").strip(),
+                    r.get("cve", ""),
+                    sev,
+                    score,
+                    r.get("published", ""),
+                    r.get("lastModified", ""),
+                    r.get("matched_cpe_query", ""),
+                    "yes" if r.get("kev") else "",
+                    ";".join(r.get("cwes", [])),
+                    (r.get("description", "") or "").replace("\n", " ").strip(),
                 ]
             )
         body = buf.getvalue()
-        return Response(
-            body,
-            mimetype="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{entry["name"]}_{window}.csv"'},
-        )
+        return Response(body, mimetype="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{current["name"]}_{win}.csv"'})
 
     return app

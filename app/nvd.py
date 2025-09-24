@@ -1,44 +1,27 @@
-"""NVD API helpers (CVE + CPE products)."""
-from __future__ import annotations
-
-import random
-import time
-from typing import Any, Dict, Iterator, List, Optional
+from typing import List, Optional, Dict, Any
 
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import urllib3
 
-from .config import (
-    CVE_API_BASE,
-    CPE_API_BASE,
-    DEFAULT_TIMEOUT,
-    MAX_CPE_PAGE_SIZE,
-    MAX_CVE_PAGE_SIZE,
-    MAX_RANGE_DAYS,
-    MAX_RETRY_DELAY,
-)
-from .utils import chunk_windows, has_specific_version, iso
+from .config import API_BASE, MAX_RANGE_DAYS, DEFAULT_TIMEOUT
+from .utils import iso, chunk_windows, has_specific_version
 
-UA = "CPE-Watch/2.0 (+local)"
-RETRY_STATUS = {429, 500, 502, 503, 504}
-MAX_ATTEMPTS = 6
-_RNG = random.SystemRandom()
+UA = "CPE-Watch/1.2 (+local)"
 
 
-def build_session(
-    https_proxy: Optional[str] = None,
-    http_proxy: Optional[str] = None,
-    ca_bundle: Optional[str] = None,
-    insecure: bool = False,
-    timeout: int = DEFAULT_TIMEOUT,
-) -> requests.Session:
-    """Create a configured ``requests.Session`` for NVD calls."""
-
+def build_session(https_proxy=None, http_proxy=None, ca_bundle=None, insecure=False, timeout=DEFAULT_TIMEOUT):
     session = requests.Session()
-    adapter = HTTPAdapter(max_retries=0)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
+    retry = Retry(
+        total=4,
+        backoff_factor=1.0,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=("GET",),
+        raise_on_status=False,
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    session.mount("http://", HTTPAdapter(max_retries=retry))
 
     proxies: Dict[str, str] = {}
     if http_proxy:
@@ -50,8 +33,7 @@ def build_session(
 
     if ca_bundle:
         session.verify = ca_bundle
-
-    session.timeout = timeout or DEFAULT_TIMEOUT
+    session.timeout = timeout
 
     if insecure:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -59,213 +41,51 @@ def build_session(
     return session
 
 
-def _session_timeout(session: requests.Session) -> int:
-    try:
-        value = int(getattr(session, "timeout", DEFAULT_TIMEOUT))
-        return value if value > 0 else DEFAULT_TIMEOUT
-    except (TypeError, ValueError):
-        return DEFAULT_TIMEOUT
-
-
-def _headers(api_key: Optional[str]) -> Dict[str, str]:
+def _do_get(session: requests.Session, params, insecure: bool, api_key: Optional[str], url: str = API_BASE):
     headers = {
         "User-Agent": UA,
         "Accept": "application/json",
     }
     if api_key:
         headers["apiKey"] = api_key
-    return headers
+    verify = False if insecure else getattr(session, "verify", True)
+    timeout = getattr(session, "timeout", DEFAULT_TIMEOUT)
+    return session.get(url, headers=headers, params=params, verify=verify, timeout=timeout)
 
 
-def _request_json(
-    session: requests.Session,
-    url: str,
-    params: Dict[str, Any],
-    *,
-    insecure: bool,
-    api_key: Optional[str],
-) -> Dict[str, Any]:
-    """Perform a GET request with retry/backoff and return decoded JSON."""
-
-    delay = 1.0
-    last_exc: Optional[Exception] = None
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        try:
-            response = session.get(
-                url,
-                params=params,
-                headers=_headers(api_key),
-                timeout=_session_timeout(session),
-                verify=False if insecure else getattr(session, "verify", True),
-            )
-        except requests.exceptions.SSLError as exc:
-            message = (
-                "TLS handshake with the NVD API failed. "
-                "Provide a CA bundle (--ca-bundle) or enable insecure mode (--insecure)."
-            )
-            raise requests.exceptions.SSLError(message) from exc
-        except requests.RequestException as exc:
-            last_exc = exc
-        else:
-            status = response.status_code
-            if status in RETRY_STATUS:
-                last_exc = requests.HTTPError(f"HTTP {status}", response=response)
-            elif status >= 400:
-                response.raise_for_status()
-            else:
-                try:
-                    return response.json()
-                except ValueError:
-                    last_exc = requests.HTTPError("Invalid JSON from NVD", response=response)
-                    break
-
-        wait = min(delay + _RNG.uniform(0, delay), MAX_RETRY_DELAY)
-        time.sleep(wait)
-        delay = min(delay * 2, MAX_RETRY_DELAY)
-
-    if last_exc:
-        raise last_exc
-    raise requests.HTTPError("NVD request failed after retries")
-
-
-def _fetch_cve_window(
-    session: requests.Session,
-    params_base: Dict[str, Any],
-    since,
-    until,
-    *,
-    insecure: bool,
-    api_key: Optional[str],
-) -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
-    base = dict(params_base)
-    base.setdefault("resultsPerPage", MAX_CVE_PAGE_SIZE)
-    for window_start, window_end in chunk_windows(since, until, MAX_RANGE_DAYS):
+def _fetch_window(session, params_base, since, until, insecure, api_key) -> List[dict]:
+    results: List[dict] = []
+    for start, end in chunk_windows(since, until, MAX_RANGE_DAYS):
         start_index = 0
         while True:
-            params = dict(base)
-            params["lastModStartDate"] = iso(window_start)
-            params["lastModEndDate"] = iso(window_end)
+            params = dict(params_base)
+            params["lastModStartDate"] = iso(start)
+            params["lastModEndDate"] = iso(end)
             params["startIndex"] = start_index
-            data = _request_json(
-                session,
-                CVE_API_BASE,
-                params,
-                insecure=insecure,
-                api_key=api_key,
-            )
-            vulns = data.get("vulnerabilities", []) or []
-            results.extend(vulns)
+
+            response = _do_get(session, params, insecure, api_key)
+            if response.status_code in (400, 404):
+                if "noRejected" in params:
+                    retry_params = dict(params)
+                    retry_params.pop("noRejected", None)
+                    retry_response = _do_get(session, retry_params, insecure, api_key)
+                    retry_response.raise_for_status()
+                    data = retry_response.json()
+                else:
+                    response.raise_for_status()
+            else:
+                response.raise_for_status()
+                data = response.json()
+
+            vulnerabilities = data.get("vulnerabilities", []) or []
+            results.extend(vulnerabilities)
+
             total = int(data.get("totalResults", 0))
-            rpp = int(data.get("resultsPerPage", len(vulns) or base["resultsPerPage"]))
-            current_index = int(data.get("startIndex", start_index))
-            next_index = current_index + rpp
-            if next_index >= total or rpp <= 0 or not vulns:
+            per_page = int(data.get("resultsPerPage", 0))
+            start_index = int(data.get("startIndex", 0)) + per_page
+            if start_index >= total or per_page == 0:
                 break
-            start_index = next_index
     return results
-
-
-def fetch_for_cpe(
-    session: requests.Session,
-    cpe: str,
-    since,
-    until,
-    *,
-    api_key: Optional[str],
-    insecure: bool,
-    no_rejected: bool = True,
-    is_vulnerable: bool = False,
-    extra_params: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    """Fetch CVEs for a CPE with automatic fallback handling."""
-
-    params = {"resultsPerPage": MAX_CVE_PAGE_SIZE}
-    params.update(extra_params or {})
-
-    if is_vulnerable:
-        params["cpeName"] = cpe
-        params["isVulnerable"] = "true"
-    else:
-        params["virtualMatchString"] = cpe
-
-    if no_rejected:
-        params["noRejected"] = "true"
-
-    try:
-        return _fetch_cve_window(
-            session,
-            params,
-            since,
-            until,
-            insecure=insecure,
-            api_key=api_key,
-        )
-    except requests.HTTPError as exc:
-        status = getattr(exc, "response", None)
-        status_code = getattr(status, "status_code", None)
-        if status_code in (400, 404):
-            params_no_rejected = dict(params)
-            params_no_rejected.pop("noRejected", None)
-            if params_no_rejected != params:
-                try:
-                    return _fetch_cve_window(
-                        session,
-                        params_no_rejected,
-                        since,
-                        until,
-                        insecure=insecure,
-                        api_key=api_key,
-                    )
-                except requests.HTTPError:
-                    pass
-            if not is_vulnerable and has_specific_version(cpe):
-                params_strict = dict(params)
-                params_strict.pop("virtualMatchString", None)
-                params_strict["cpeName"] = cpe
-                return _fetch_cve_window(
-                    session,
-                    params_strict,
-                    since,
-                    until,
-                    insecure=insecure,
-                    api_key=api_key,
-                )
-        raise
-
-
-def iter_cpe_products(
-    session: requests.Session,
-    *,
-    api_key: Optional[str],
-    insecure: bool,
-    params: Dict[str, Any],
-) -> Iterator[Dict[str, Any]]:
-    """Iterate over results from the CPE products API."""
-
-    base = dict(params)
-    rpp = min(MAX_CPE_PAGE_SIZE, int(base.get("resultsPerPage", MAX_CPE_PAGE_SIZE)))
-    if rpp <= 0:
-        rpp = MAX_CPE_PAGE_SIZE
-    base["resultsPerPage"] = rpp
-    start_index = int(base.get("startIndex", 0))
-    while True:
-        base["startIndex"] = start_index
-        data = _request_json(
-            session,
-            CPE_API_BASE,
-            base,
-            insecure=insecure,
-            api_key=api_key,
-        )
-        products = data.get("products", []) or []
-        for item in products:
-            yield item
-        total = int(data.get("totalResults", 0))
-        rpp = int(data.get("resultsPerPage", len(products) or base["resultsPerPage"]))
-        if not products or start_index + rpp >= total:
-            break
-        start_index += rpp
 
 
 def _severity_from_score(score: Optional[float]) -> str:
@@ -273,7 +93,7 @@ def _severity_from_score(score: Optional[float]) -> str:
         return "None"
     try:
         value = float(score)
-    except (TypeError, ValueError):
+    except Exception:
         return "None"
     if value >= 9.0:
         return "Critical"
@@ -286,29 +106,30 @@ def _severity_from_score(score: Optional[float]) -> str:
     return "None"
 
 
-def pick_preferred_cvss(metrics: Dict[str, Any]) -> Dict[str, Any]:
+def _pick_cvss(metrics: Dict[str, Any]) -> Dict[str, Any]:
     for key in ("cvssMetricV4", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
         series = metrics.get(key)
         if not series:
             continue
-        data = series[0].get("cvssData", {}) if isinstance(series, list) else {}
+        entry = series[0]
+        data = entry.get("cvssData", {}) or {}
         score = data.get("baseScore")
-        severity = series[0].get("baseSeverity") if isinstance(series, list) else None
+        severity = entry.get("baseSeverity") or data.get("baseSeverity") or _severity_from_score(score)
         return {
             "version": data.get("version"),
-            "vectorString": data.get("vectorString"),
+            "vector": data.get("vectorString"),
             "baseScore": score,
-            "baseSeverity": severity or _severity_from_score(score),
+            "baseSeverity": severity,
         }
-    return {
-        "version": None,
-        "vectorString": None,
-        "baseScore": None,
-        "baseSeverity": "None",
-    }
+    return {"version": None, "vector": None, "baseScore": None, "baseSeverity": "None"}
 
 
-def extract_description(vuln: Dict[str, Any]) -> str:
+def extract_metrics(vuln) -> Dict[str, Any]:
+    metrics = vuln.get("cve", {}).get("metrics", {}) or {}
+    return _pick_cvss(metrics)
+
+
+def extract_description(vuln) -> str:
     descriptions = vuln.get("cve", {}).get("descriptions", []) or []
     for entry in descriptions:
         if (entry.get("lang") or "").lower() == "en":
@@ -322,53 +143,66 @@ def extract_description(vuln: Dict[str, Any]) -> str:
     return ""
 
 
-def extract_cwes(vuln: Dict[str, Any]) -> List[str]:
-    out: List[str] = []
+def extract_cwes(vuln) -> List[str]:
+    found: List[str] = []
     weaknesses = vuln.get("cve", {}).get("weaknesses") or []
-    for weak in weaknesses:
-        for desc in weak.get("description") or []:
-            value = (desc.get("value") or "").strip()
-            if value.startswith("CWE-") and value not in out:
-                out.append(value)
-    return out
+    for weakness in weaknesses:
+        for description in weakness.get("description") or []:
+            value = (description.get("value") or "").strip()
+            if value.startswith("CWE-") and value not in found:
+                found.append(value)
+    return found
 
 
-def extract_references(vuln: Dict[str, Any]) -> List[Dict[str, Any]]:
-    refs = vuln.get("cve", {}).get("references") or []
-    items: List[Dict[str, Any]] = []
-    for ref in refs:
-        items.append(
+def extract_references(vuln) -> List[Dict[str, Any]]:
+    references = []
+    for ref in (vuln.get("cve", {}).get("references") or []):
+        references.append(
             {
                 "url": ref.get("url"),
                 "source": ref.get("source"),
                 "tags": ref.get("tags") or [],
             }
         )
-    return items
+    return references
 
 
-def extract_affected_cpes(vuln: Dict[str, Any]) -> List[str]:
-    cfg = vuln.get("cve", {}).get("configurations") or {}
-    acc: List[str] = []
-    nodes = cfg.get("nodes") or []
-    for node in nodes:
-        matches = node.get("cpeMatch") or []
-        for match in matches:
-            for key in ("criteria", "cpeName"):
-                val = match.get(key)
-                if val and val not in acc:
-                    acc.append(val)
-    return acc
-
-
-def is_kev(vuln: Dict[str, Any]) -> bool:
+def is_kev(vuln) -> bool:
     cve = vuln.get("cve", {})
-    return any(
-        key in cve
-        for key in (
-            "cisaExploitAdd",
-            "cisaActionDue",
-            "cisaRequiredAction",
-            "cisaVulnerabilityName",
-        )
+    kev_keys = (
+        "cisaExploitAdd",
+        "cisaActionDue",
+        "cisaRequiredAction",
+        "cisaVulnerabilityName",
     )
+    return any(key in cve for key in kev_keys)
+
+
+def fetch_for_cpe(
+    session: requests.Session,
+    cpe: str,
+    since,
+    until,
+    api_key: Optional[str],
+    insecure: bool,
+    no_rejected: bool = True,
+) -> List[dict]:
+    """
+    Preferred path: virtualMatchString (broad, wildcard-friendly).
+    If server responds 400/404, retry without noRejected.
+    If still unsupported and CPE has specific version, fall back to cpeName (strict).
+    """
+    params = {"resultsPerPage": 2000, "virtualMatchString": cpe}
+    if no_rejected:
+        params["noRejected"] = "true"
+
+    try:
+        return _fetch_window(session, params, since, until, insecure, api_key)
+    except requests.HTTPError as exc:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code in (400, 404) and has_specific_version(cpe):
+            fallback = {"resultsPerPage": 2000, "cpeName": cpe}
+            if no_rejected:
+                fallback["noRejected"] = "true"
+            return _fetch_window(session, fallback, since, until, insecure, api_key)
+        raise

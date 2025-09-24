@@ -1,20 +1,7 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Tuple, Optional, Dict
 
-import logging
-
-from .utils import iso, now_utc
-from .nvd import (
-    extract_affected_cpes,
-    extract_cwes,
-    extract_description,
-    extract_references,
-    fetch_for_cpe,
-    is_kev,
-    pick_preferred_cvss,
-)
-
-
-logger = logging.getLogger(__name__)
+from .utils import now_utc, iso
+from .nvd import fetch_for_cpe, extract_metrics, is_kev, extract_description, extract_cwes, extract_references
 
 
 def run_scan(
@@ -25,30 +12,20 @@ def run_scan(
     insecure: bool,
     api_key: Optional[str],
     since,
-    *,
     no_rejected: bool = True,
     kev_only: bool = False,
-    min_score: Optional[float] = None,
-    is_vulnerable: bool = False,
-    extra_params: Optional[Dict[str, Any]] = None,
-) -> Tuple[List[dict], dict, List[Dict[str, str]]]:
-    """Run a scan across all provided CPE strings.
-
-    Returns a tuple of ``(results, updated_state, issues)`` where ``issues`` is a
-    list of dictionaries describing recoverable errors that occurred while
-    talking to the NVD API.  Callers can use these to surface actionable
-    diagnostics to the user instead of silently swallowing failures.
+) -> Tuple[List[dict], dict]:
     """
-
+    Returns (records_list, updated_state_entry)
+    state_all[state_key] = {"version": 3, "last_long_rescan": ISO, "per_cpe": {cpe: ISO}}
+    """
     now = now_utc()
     entry = state_all.get(state_key) or {}
     per_cpe = dict(entry.get("per_cpe") or {})
     last_long_rescan = entry.get("last_long_rescan")
 
-    results: Dict[str, Dict[str, Any]] = {}
+    all_vulns: Dict[str, dict] = {}
     any_success = False
-    issues: List[Dict[str, str]] = []
-    extra_params = extra_params or {}
 
     for cpe in cpes:
         try:
@@ -60,92 +37,45 @@ def run_scan(
                 api_key=api_key,
                 insecure=insecure,
                 no_rejected=no_rejected,
-                is_vulnerable=is_vulnerable,
-                extra_params=extra_params,
             )
-        except Exception as exc:  # pragma: no cover - network edge cases
-            message = f"{type(exc).__name__}: {exc}"
-            logger.exception("NVD request failed for %s", cpe)
-            issues.append({"cpe": cpe, "message": message})
-            continue
-
-        any_success = True
-        per_cpe[cpe] = iso(now)
-
-        for vuln in vulns:
-            cve_obj = vuln.get("cve", {}) or {}
-            cve_id = cve_obj.get("id")
-            if not cve_id:
-                continue
-
-            record = results.get(cve_id)
-            metrics = pick_preferred_cvss(cve_obj.get("metrics") or {})
-            affected = extract_affected_cpes(vuln)
-
-            if not record:
+            any_success = True
+            per_cpe[cpe] = iso(now)
+            for item in vulns:
+                cve_obj = item.get("cve", {}) or {}
+                cve_id = cve_obj.get("id")
+                if not cve_id:
+                    continue
+                metrics = extract_metrics(item)
                 record = {
-                    "id": cve_id,
+                    "cve": cve_id,
                     "published": cve_obj.get("published"),
                     "lastModified": cve_obj.get("lastModified"),
                     "sourceIdentifier": cve_obj.get("sourceIdentifier"),
-                    "kev": is_kev(vuln),
-                    "description": extract_description(vuln),
-                    "cwes": extract_cwes(vuln),
-                    "references": extract_references(vuln),
-                    "affectedCPE": set(affected),
-                    "matchedCPE": {cpe},
-                    "cvss": metrics,
-                    "cvssScore": metrics.get("baseScore"),
-                    "cvssSeverity": metrics.get("baseSeverity"),
-                    "cvssVector": metrics.get("vectorString"),
+                    "kev": is_kev(item),
+                    "metrics": metrics,
+                    "severity": metrics.get("baseSeverity") or "None",
+                    "score": metrics.get("baseScore"),
+                    "refs": extract_references(item),
+                    "matched_cpe_query": cpe,
+                    "description": extract_description(item),
+                    "cwes": extract_cwes(item),
                     "vulnStatus": cve_obj.get("vulnStatus"),
                 }
-                results[cve_id] = record
-            else:
-                record["kev"] = record["kev"] or is_kev(vuln)
-                record["affectedCPE"].update(affected)
-                record["matchedCPE"].add(cpe)
-                last_mod = cve_obj.get("lastModified")
-                if last_mod and (record.get("lastModified") or "") < last_mod:
-                    record["lastModified"] = last_mod
-                    record["published"] = cve_obj.get("published") or record["published"]
-                    record["sourceIdentifier"] = cve_obj.get("sourceIdentifier") or record.get("sourceIdentifier")
-                new_metrics = pick_preferred_cvss(cve_obj.get("metrics") or {})
-                if (new_metrics.get("baseScore") or -1) >= (record["cvss"].get("baseScore") or -1):
-                    record["cvss"] = new_metrics
-                    record["cvssScore"] = new_metrics.get("baseScore")
-                    record["cvssSeverity"] = new_metrics.get("baseSeverity")
-                    record["cvssVector"] = new_metrics.get("vectorString")
+                previous = all_vulns.get(cve_id)
+                if not previous or (record["lastModified"] or "") > (previous.get("lastModified") or ""):
+                    all_vulns[cve_id] = record
+        except Exception as exc:  # pragma: no cover - network edge cases
+            print(f"[WARN] request failed for {cpe}: {exc}")
 
-    updated = {"version": 4, "per_cpe": per_cpe}
+    out_list = sorted(all_vulns.values(), key=lambda value: (value["lastModified"] or value["published"] or ""))
+
+    updated = {"version": 3, "per_cpe": per_cpe}
     if any_success and (now - since).days >= 89:
         updated["last_long_rescan"] = iso(now)
     elif last_long_rescan:
         updated["last_long_rescan"] = last_long_rescan
 
-    min_score_val: Optional[float]
-    try:
-        min_score_val = float(min_score) if min_score is not None else None
-    except (TypeError, ValueError):
-        min_score_val = None
+    if kev_only:
+        out_list = [record for record in out_list if record.get("kev")]
 
-    out: List[Dict[str, Any]] = []
-    for record in results.values():
-        record["affectedCPE"] = sorted(record["affectedCPE"].union(record["matchedCPE"]))
-        record["matchedCPE"] = sorted(record["matchedCPE"])
-
-        score = record.get("cvssScore")
-        if kev_only and not record.get("kev"):
-            continue
-        if min_score_val is not None:
-            try:
-                score_val = float(score)
-            except (TypeError, ValueError):
-                continue
-            if score_val < min_score_val:
-                continue
-
-        out.append(record)
-
-    out.sort(key=lambda x: (x.get("lastModified") or x.get("published") or ""), reverse=True)
-    return out, updated, issues
+    return out_list, updated
