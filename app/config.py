@@ -14,17 +14,11 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # NVD / scan constants
-CVE_API_BASE = os.getenv("NVD_CVE_API_BASE", "https://services.nvd.nist.gov/rest/json/cves/2.0")
-CPE_API_BASE = os.getenv("NVD_CPE_API_BASE", "https://services.nvd.nist.gov/rest/json/cpes/2.0")
-API_BASE = CVE_API_BASE  # backward compat for legacy imports
-MAX_CVE_PAGE_SIZE = 2000
-MAX_CPE_PAGE_SIZE = 10000
-MAX_RETRY_DELAY = 60
+API_BASE = os.getenv("NVD_API_BASE", "https://services.nvd.nist.gov/rest/json/cves/2.0")
 MAX_RANGE_DAYS = 120
 DEFAULT_TIMEOUT = 60
 DAILY_LOOKBACK_HOURS = 24      # daily window
 LONG_BACKFILL_DAYS = 90        # backfill depth
-EXTENDED_LOOKBACK_DAYS = 120   # extended scan depth
 BACKFILL_PERIOD_DAYS = 90      # do a 90d backfill every 90 days
 
 # Safety baseline for NVD's backlog reset

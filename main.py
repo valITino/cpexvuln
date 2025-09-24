@@ -1,4 +1,3 @@
-# main.py
 """
 Entry point for NVD CPE Watch.
 
@@ -36,7 +35,6 @@ try:
         OUT_DIR,
         DAILY_LOOKBACK_HOURS,
         LONG_BACKFILL_DAYS,
-        EXTENDED_LOOKBACK_DAYS,
     )
 except Exception as e:
     # Helpful message if the package can't be imported
@@ -75,9 +73,9 @@ def main():
     runp.add_argument("--cpes-file", required=True, help="Text file with one CPE per line (or comma separated)")
     runp.add_argument(
         "--win",
-        choices=["24h", "90d", "120d"],
+        choices=["24h", "90d"],
         default="24h",
-        help="Window to scan (24h, 90d, or 120d)",
+        help="Window to scan (24h or 90d)",
     )
     runp.add_argument("--out-dir", default=OUT_DIR, help="Directory to write NDJSON files")
 
@@ -116,16 +114,14 @@ def main():
         now = now_utc()
         if args.win == "24h":
             since = now - timedelta(hours=DAILY_LOOKBACK_HOURS)
-        elif args.win == "90d":
-            since = now - timedelta(days=LONG_BACKFILL_DAYS)
         else:
-            since = now - timedelta(days=EXTENDED_LOOKBACK_DAYS)
+            since = now - timedelta(days=LONG_BACKFILL_DAYS)
 
         # Stateful dedupe per unique CPE set
         state_all = load_json(STATE_FILE, {})
         state_key = f"nvd:{hash_for_cpes(cpes)}"
 
-        results, updated_entry, issues = run_scan(
+        results, updated_entry = run_scan(
             cpes=cpes,
             state_all=state_all,
             state_key=state_key,
@@ -136,10 +132,6 @@ def main():
             no_rejected=True,
             kev_only=False,
         )
-
-        if issues:
-            for issue in issues:
-                logger.error("NVD request failed for %s: %s", issue.get("cpe"), issue.get("message"))
 
         # Save state
         if updated_entry.get("per_cpe"):
