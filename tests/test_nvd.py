@@ -3,6 +3,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
 import requests
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -129,3 +130,20 @@ def test_fetch_for_cpe_falls_back_to_cpe_name(monkeypatch):
     )
     assert result == []
     assert any("cpeName" in call for call in params_seen)
+
+
+def test_request_json_ssl_error(monkeypatch):
+    session = DummySession()
+
+    def raise_ssl(url, params=None, headers=None, timeout=None, verify=True):
+        raise requests.exceptions.SSLError("bad cert")
+
+    session.get = raise_ssl  # type: ignore[method-assign]
+    sleeps = []
+    monkeypatch.setattr(nvd.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    with pytest.raises(requests.exceptions.SSLError) as excinfo:
+        nvd._request_json(session, "https://example", {}, insecure=False, api_key=None)
+
+    assert "TLS handshake" in str(excinfo.value)
+    assert sleeps == []

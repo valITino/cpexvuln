@@ -98,6 +98,12 @@ def _request_json(
                 timeout=_session_timeout(session),
                 verify=False if insecure else getattr(session, "verify", True),
             )
+        except requests.exceptions.SSLError as exc:
+            message = (
+                "TLS handshake with the NVD API failed. "
+                "Provide a CA bundle (--ca-bundle) or enable insecure mode (--insecure)."
+            )
+            raise requests.exceptions.SSLError(message) from exc
         except requests.RequestException as exc:
             last_exc = exc
         else:
