@@ -14,11 +14,12 @@ A lightweight Flask application for tracking newly published CVEs that match the
 - [Project layout](#project-layout)
 
 ## Features
-- **Watchlists with history** – curate named watchlists of one or more CPE 2.3 strings and revisit prior scans without re-entering criteria.
-- **Fast scanning windows** – query the NVD API for the last 24 hours or perform a rolling 90 day backfill to catch up after gaps.
-- **High-signal results** – merge duplicate CVEs, annotate KEV status, include CVSS metrics, references, CWE identifiers, and human-readable descriptions.
-- **Flexible exports** – download NDJSON or CSV snapshots directly from the UI or produce machine-friendly NDJSON through the CLI runner.
-- **Operational niceties** – optional API key support, HTTP/S proxy forwarding, custom CA bundles, TLS skip (for debugging), and resilient state handling for long-lived deployments.
+- **Projects & watchlists** – organise watches into collapsible folders with drag-and-drop, keyboard shortcuts, import/export, and bulk deletion.
+- **Fast scanning windows** – query the NVD API for the last 24 hours, 90 days, or an extended 120 day sweep while respecting the 120-day API window cap.
+- **High-signal results** – merge duplicate CVEs, annotate KEV status, compute preferred CVSS v4/v3 metrics, list affected CPEs, CWEs, references, and surface filter pills that mirror active search criteria.
+- **Flexible exports** – export the current grid view as CSV or NDJSON, or run the CLI to emit normalised NDJSON snapshots for downstream automation.
+- **CPE tooling** – build strings with the interactive builder, fetch name suggestions from the NVD Products API, and validate isVulnerable requests when versions are wildcards.
+- **Operational niceties** – per-watchlist overrides for API keys, proxies, CA bundles, TLS skipping, and timeouts plus resilient retry/backoff logic.
 
 ## Architecture overview
 - **Flask web app** – `app/web.py` wires endpoints for watchlist CRUD, scan orchestration, and export helpers while rendering a responsive Tailwind-powered interface located in `app/templates` and `app/static`.
@@ -37,7 +38,7 @@ A lightweight Flask application for tracking newly published CVEs that match the
    pip install -r requirements.txt
    ```
 3. **Seed data directories** – the first run creates `./data`, `./data/watchlists.json`, and `./data/state.json`. You can pre-populate watchlists by editing the JSON file if desired.
-4. **Environment** – export `NVD_API_KEY` if you have one, and set `HTTPS_PROXY`, `HTTP_PROXY`, or `REQUESTS_CA_BUNDLE` as needed before launching.
+4. **Environment** – export `NVD_API_KEY` if you have one and set `HTTPS_PROXY`, `HTTP_PROXY`, or `REQUESTS_CA_BUNDLE` to mirror your network. The CLI accepts the same values via flags (`--https-proxy`, `--http-proxy`, `--ca-bundle`, `--timeout`, `--insecure`).
 
 ## Running the web UI
 Start the interactive dashboard (binds to `127.0.0.1:5000` by default):
@@ -46,7 +47,14 @@ Start the interactive dashboard (binds to `127.0.0.1:5000` by default):
 python main.py web --insecure  # omit --insecure in production
 ```
 
-Key UI capabilities include creating watchlists, toggling bulk select mode, triggering 24 h or 90 d scans, exporting current results as JSON/CSV, and filtering or sharing watchlists via deep links. Results are cached on disk so repeated scans are incremental rather than exhaustive.
+Key UI capabilities include:
+
+- creating or editing watchlists inside projects (folders) with drag-and-drop reordering and keyboard shortcuts (`N`, `P`, `A`, `Del`)
+- using the CPE 2.3 builder with live suggestions from the Products API and piping finished strings into the watch form
+- triggering 24 h, 90 d, or 120 d scans, reviewing per-project match counts, and re-running watches directly from the sidebar quick actions
+- filtering results with search/severity/min-score/KEV toggles, removing filters via pills, and exporting the current grid as CSV or NDJSON
+
+Results are cached on disk so repeated scans are incremental rather than exhaustive.
 
 To deploy behind a reverse proxy, override the bind host/port:
 
@@ -62,11 +70,13 @@ python main.py run --cpes-file ./cpes/sample.txt --win 24h --out-dir ./exports
 ```
 
 - `--win 24h` scans the past day; `--win 90d` performs a deeper historical crawl and updates the `last_long_rescan` marker for the watchlist hash.
+- Optional connection flags mirror the web server: `--nvd-api-key`, `--https-proxy`, `--http-proxy`, `--ca-bundle`, `--timeout`, and `--insecure`.
+- `--win 24h` scans the past day; `--win 90d` or `--win 120d` perform deeper historical crawls and update the `last_long_rescan` marker.
 - Input files accept one CPE per line or comma-separated entries. Comments beginning with `#` are ignored.
 - Results are written as newline-delimited JSON with the file name `nvd_<timestamp>.jsonl`. Each entry mirrors the schema returned by the web UI, including KEV flags, severity, references, and the CPE that matched.
 
 ## Data & persistence
-- **Watchlists** live in `data/watchlists.json` and are keyed by UUIDs generated in the web UI. Each entry stores a display name, the list of CPE strings, and optional flags such as `insecure` (skip TLS per watchlist).
+- **Projects & watchlists** live in `data/watchlists.json`. The file contains a `projects` array (folders) and a `lists` array (watchlists). Each list entry stores a UUID, project ID, ordered CPE strings, and an `options` object (e.g., `noRejected`, `isVulnerable`, `minCvss`, API key, proxies, timeout).
 - **Scan state** resides in `data/state.json`. Keys are derived from the SHA-256 hash of the sorted CPE set, enabling deduplication of overlapping watchlists. The state tracks the last run per CPE and the timestamp of the most recent 90-day backfill.
 - **Exports** created through the CLI go into `data/out/` by default but you can point `--out-dir` elsewhere.
 
@@ -78,6 +88,8 @@ The scanner follows the official NVD CVE 2.0 feed contract:
 - Queries use `virtualMatchString=<CPE>` to support wildcard matching. If NVD rejects the combination and the CPE includes a precise version, the code retries with `cpeName=<CPE>` for strict matching.
 - Requests are chunked into 120-day slices (`MAX_RANGE_DAYS`) and paginated until `totalResults` are exhausted. Retries are configured for HTTP 429/5xx responses with exponential backoff.
 - Responses are normalized to surface CVSS v4/v3 metrics when available, severity labels, CISA KEV indicators, CWE identifiers, and reference links.
+- The watchlist options map to supported parameters (`noRejected`, `hasKev`, `cveId`, `cweId`, `cvssV3Severity`, `cvssV4Severity`, etc.). Per-watchlist `isVulnerable=true` automatically switches to `cpeName` queries because `virtualMatchString` is not accepted by the API in that mode.
+- CPE suggestions in the builder query the [NVD Products API](https://nvd.nist.gov/developers/products) using `cpeMatchString` plus `keywordSearch`, retrieving up to 10 000 results per page and deduplicating by `cpeName`.
 
 Consult the [NVD API documentation](https://nvd.nist.gov/vuln/data-feeds) for query semantics, authentication, and service limits.
 
