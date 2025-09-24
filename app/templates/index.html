@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="{{ bootstrap.csrfToken }}" />
     <title>NVD CPE Watch</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
@@ -13,49 +14,24 @@
         <div class="sidebar__header">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <svg
-                viewBox="0 0 24 24"
-                class="h-5 w-5 text-indigo-600"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
+              <svg viewBox="0 0 24 24" class="h-5 w-5 text-indigo-600" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 7h16M4 12h16M4 17h10" />
               </svg>
               <span class="font-semibold">CPE Watch</span>
             </div>
-            <a href="#create" class="btn btn--primary">New</a>
+            <button id="btnNewWatch" class="btn btn--primary">New</button>
           </div>
 
           <div class="mt-3 flex gap-2">
             <div class="relative flex-1">
-              <input
-                id="wlSearch"
-                class="search"
-                placeholder="Search watchlists"
-                type="search"
-              />
-              <svg
-                viewBox="0 0 24 24"
-                class="search__icon"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
+              <input id="wlSearch" class="search" placeholder="Search watchlists" type="search" />
+              <svg viewBox="0 0 24 24" class="search__icon" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="11" cy="11" r="8"></circle>
                 <path d="m21 21-4.3-4.3"></path>
               </svg>
             </div>
             <button id="selectMode" class="btn btn--ghost">Select</button>
-            <form
-              method="post"
-              action="{{ url_for('delete_lists') }}"
-              id="bulkDelForm"
-              onsubmit="return confirm('Delete selected watchlists?');"
-            >
-              <input type="hidden" name="ids" id="bulkIds" value="" />
-              <button id="bulkDelete" disabled class="btn btn--danger">Delete</button>
-            </form>
+            <button id="btnNewProject" class="btn btn--ghost" title="Create project">New project</button>
           </div>
 
           <div class="mt-2 flex items-center gap-3 text-xs text-slate-600">
@@ -64,262 +40,219 @@
               <span>All</span>
             </label>
             <span class="text-slate-300">•</span>
-            <button
-              class="link"
-              onclick="document.querySelector('#cpesField')?.scrollIntoView({behavior:'smooth'}); return false;"
-            >
-              Create watch
-            </button>
+            <button class="link" id="btnCollapseAll">Collapse all</button>
+            <span class="text-slate-300">•</span>
+            <button class="link" id="btnExpandAll">Expand all</button>
           </div>
         </div>
-
-        {% if watchlists %}
-        <ul id="wlList" class="p-3 space-y-1">
-          {% for w in watchlists %}
-          <li class="relative group" data-id="{{ w.id }}">
-            <div
-              class="watchlist-entry {% if current and current.id==w.id %}watchlist-entry--active{% endif %}"
-            >
-              <input type="checkbox" class="wlbox h-4 w-4 mt-0.5 hidden" value="{{ w.id }}" />
-              <a
-                href="{{ url_for('open_watchlist', wid=w.id) }}"
-                class="wlLink min-w-0"
-                data-key="{{ (w.name ~ ' ' ~ (w.cpes|join(' ')))|lower }}"
-              >
-                <div class="text-sm font-medium truncate">{{ w.name }}</div>
-                <div class="text-xs text-slate-500 truncate">
-                  {{ w.cpes|length }} CPE{{ 's' if w.cpes|length != 1 else '' }} •
-                  {{ (w.cpes[0] if w.cpes else '')|replace('cpe:2.3:','') }}
-                </div>
-              </a>
-
-              <div class="entry-actions">
-                <a
-                  title="Scan 24h"
-                  class="quick-btn"
-                  data-no-toggle
-                  href="{{ url_for('run_watchlist_view', wid=w.id, win='24h') }}"
-                  >24h</a
-                >
-                <a
-                  title="Backfill 90d"
-                  class="quick-btn"
-                  data-no-toggle
-                  href="{{ url_for('run_watchlist_view', wid=w.id, win='90d') }}"
-                  >90d</a
-                >
-
-                <div class="relative" data-no-toggle>
-                  <button type="button" class="more-btn">⋯</button>
-                  <div class="menuPanel hidden">
-                    <a class="menuPanel__item" href="{{ url_for('export_json', wid=w.id, win='24h') }}"
-                      >Export JSON (24h)</a
-                    >
-                    <a class="menuPanel__item" href="{{ url_for('export_csv', wid=w.id, win='24h') }}"
-                      >Export CSV (24h)</a
-                    >
-                    <a class="menuPanel__item" href="{{ url_for('export_json', wid=w.id, win='90d') }}"
-                      >Export JSON (90d)</a
-                    >
-                    <a class="menuPanel__item" href="{{ url_for('export_csv', wid=w.id, win='90d') }}"
-                      >Export CSV (90d)</a
-                    >
-                    <a
-                      class="menuPanel__item"
-                      href="mailto:?subject={{ ('CPE Watchlist - ' + w.name)|urlencode }}&body={{ ('Open: ' + request.host_url.rstrip('/') + url_for('open_watchlist', wid=w.id))|urlencode }}"
-                      >Share via email</a
-                    >
-                    <a
-                      class="menuPanel__item"
-                      href="#"
-                      onclick="navigator.clipboard.writeText('{{ request.host_url.rstrip('/') + url_for('open_watchlist', wid=w.id) }}'); this.closest('.menuPanel').classList.add('hidden'); return false;"
-                      >Copy link</a
-                    >
-                    <a
-                      class="menuPanel__item menuPanel__item--danger"
-                      href="{{ url_for('delete_single', wid=w.id) }}"
-                      onclick="return confirm('Delete this watchlist?')"
-                      >Delete</a
-                    >
-                  </div>
-                </div>
-              </div>
-            </div>
-          </li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <div class="p-4 text-sm text-slate-500">No lists yet.</div>
-        {% endif %}
+        <div id="projectsContainer" class="p-3 space-y-3 overflow-y-auto flex-1"></div>
+        <div class="p-3 border-t text-xs text-slate-500">
+          Shortcuts: <kbd class="kbd">N</kbd> new watch, <kbd class="kbd">P</kbd> new project, <kbd class="kbd">A</kbd> select all, <kbd class="kbd">Del</kbd> delete selected.
+        </div>
       </aside>
 
       <main class="flex-1 p-6 overflow-y-auto">
-        {% with messages = get_flashed_messages() %} {% if messages %}
-        <div class="mb-4 space-y-2">
-          {% for m in messages %}
-          <div class="flash">{{ m }}</div>
-          {% endfor %}
-        </div>
-        {% endif %} {% endwith %}
+        <div id="alerts" class="space-y-2"></div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div class="lg:col-span-1" id="create">
-            <form method="post" action="{{ url_for('submit') }}" class="card space-y-3">
-              <h2 class="text-base font-semibold mb-1">Create / run a watch</h2>
-              <label class="field-label">Name (optional)</label>
-              <input
-                name="name"
-                class="field-input"
-                placeholder="e.g., Core Servers"
-                value="{{ current.name if current else '' }}"
-              />
+          <div class="lg:col-span-1 space-y-6">
+            <form id="watchForm" class="card space-y-3">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" id="formWatchId" />
+              <h2 class="text-base font-semibold mb-1 flex items-center justify-between">
+                <span id="formTitle">Create / edit watch</span>
+                <span id="formProjectLabel" class="text-xs text-slate-500"></span>
+              </h2>
 
-              <label class="field-label">CPEs (comma-separated)</label>
-              <textarea
-                id="cpesField"
-                name="cpes"
-                rows="4"
-                class="field-input"
-                placeholder="cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:x64:*, cpe:2.3:o:canonical:ubuntu_linux:*:*:*:*:*:*:*"
-              >{{ current.cpes|join(', ') if current else '' }}</textarea>
+              <label class="field-label" for="formProject">Project</label>
+              <select id="formProject" class="field-input"></select>
 
-              <label class="flex items-center gap-2 text-sm">
-                <input
-                  id="insecure"
-                  name="insecure"
-                  type="checkbox"
-                  class="h-4 w-4"
-                  {% if current and current.insecure %}checked{% endif %}
-                />
-                <span>Skip TLS verification (insecure)</span>
-              </label>
+              <label class="field-label" for="formName">Name (optional)</label>
+              <input id="formName" class="field-input" placeholder="e.g., Core Servers" />
+
+              <label class="field-label" for="formCpes">CPEs (comma-separated)</label>
+              <textarea id="formCpes" rows="4" class="field-input" placeholder="cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:x64:*, cpe:2.3:o:canonical:ubuntu_linux:*:*:*:*:*:*:*"></textarea>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                <label class="flex items-center gap-2"><input id="optNoRejected" type="checkbox" class="h-4 w-4" checked />No rejected</label>
+                <label class="flex items-center gap-2"><input id="optIsVulnerable" type="checkbox" class="h-4 w-4" />isVulnerable</label>
+                <label class="flex items-center gap-2"><input id="optHasKev" type="checkbox" class="h-4 w-4" />Has KEV</label>
+                <label class="flex items-center gap-2"><input id="optInsecure" type="checkbox" class="h-4 w-4" />Skip TLS verification</label>
+              </div>
+
+              <label class="field-label" for="optMinCvss">Default min CVSS score (UI filter)</label>
+              <input id="optMinCvss" type="number" min="0" max="10" step="0.1" class="field-input" placeholder="e.g., 7.0" />
+
+              <details class="mt-2">
+                <summary class="text-sm font-semibold cursor-pointer">Advanced NVD options</summary>
+                <div class="mt-2 space-y-2 text-sm">
+                  <label class="block">
+                    <span class="block mb-1">NVD API key</span>
+                    <input id="optApiKey" type="password" autocomplete="off" class="field-input" placeholder="Store securely" />
+                    <div class="text-xs text-slate-500" id="apiKeyHint"></div>
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">HTTP proxy</span>
+                    <input id="optHttpProxy" class="field-input" placeholder="http://user:pass@proxy:8080" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">HTTPS proxy</span>
+                    <input id="optHttpsProxy" class="field-input" placeholder="https://user:pass@proxy:8443" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">CA bundle path</span>
+                    <input id="optCaBundle" class="field-input" placeholder="/path/to/custom.pem" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">Timeout (seconds)</span>
+                    <input id="optTimeout" type="number" min="1" class="field-input" placeholder="60" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">Filter by CVE ID</span>
+                    <input id="optCveId" class="field-input" placeholder="e.g., CVE-2024-1234" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">Filter by CWE ID</span>
+                    <input id="optCweId" class="field-input" placeholder="e.g., CWE-79" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">CVSS v3 severity</span>
+                    <input id="optCvssV3Severity" class="field-input" placeholder="CRITICAL/HIGH/MEDIUM/LOW" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">CVSS v4 severity</span>
+                    <input id="optCvssV4Severity" class="field-input" placeholder="CRITICAL/HIGH/MEDIUM/LOW" />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">CVSS v3 metrics</span>
+                    <input id="optCvssV3Metrics" class="field-input" placeholder="e.g., AV:N/AC:L/..." />
+                  </label>
+                  <label class="block">
+                    <span class="block mb-1">CVSS v4 metrics</span>
+                    <input id="optCvssV4Metrics" class="field-input" placeholder="e.g., CVSS:4.0/..." />
+                  </label>
+                </div>
+              </details>
+
+              <div id="formWarnings" class="text-xs text-amber-600"></div>
 
               <div class="flex flex-col gap-2">
-                <button name="action" value="run_daily" class="cta cta--dark" title="Scans last 24 hours for each CPE">
-                  Scan last 24 hours
-                </button>
-                <button name="action" value="run_90d" class="cta cta--accent" title="Backfill scan for last 90 days">
-                  Scan last 90 days (backfill)
-                </button>
-                <button name="action" value="save_only" class="cta">Save only</button>
+                <div class="flex gap-2">
+                  <button id="btnRun24" class="cta cta--dark flex-1" type="button">Scan last 24 hours</button>
+                  <button id="btnRun90" class="cta cta--accent flex-1" type="button">Scan last 90 days</button>
+                </div>
+                <button id="btnRun120" class="cta" type="button">Scan last 120 days</button>
+                <button id="btnSaveOnly" class="cta" type="button">Save only</button>
+                <button id="btnDeleteWatch" class="btn btn--danger" type="button">Delete watch</button>
               </div>
             </form>
-          </div>
 
-          <div class="lg:col-span-2 space-y-3">
-            {% if results is not none %}
-            <script id="DATA" type="application/json">{{ results|tojson }}</script>
-
-            <div id="stickyBox" class="space-y-3">
-              <div id="filtersBox" class="card flex flex-wrap gap-3 items-end">
+            <div class="card" id="cpeBuilder">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-semibold">CPE 2.3 Builder</h3>
+                <button id="builderToggle" class="link">Hide</button>
+              </div>
+              <div id="builderBody" class="builder-grid">
                 <div>
-                  <label class="filter-label">Search</label>
-                  <input id="f_text" class="filter-input" placeholder="CVE, text, CPE" />
-                </div>
-                <div>
-                  <label class="filter-label">Severity</label>
-                  <select id="f_sev" class="filter-input">
-                    <option value="">All</option>
-                    <option>Critical</option>
-                    <option>High</option>
-                    <option>Medium</option>
-                    <option>Low</option>
-                    <option>None</option>
+                  <label class="filter-label">Part</label>
+                  <select id="b_part" class="filter-input">
+                    <option value="a">a (application)</option>
+                    <option value="o" selected>o (operating system)</option>
+                    <option value="h">h (hardware)</option>
                   </select>
                 </div>
                 <div>
-                  <label class="filter-label">Min score</label>
-                  <input
-                    id="f_score"
-                    type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
-                    class="filter-input w-24"
-                    placeholder="e.g. 7.0"
-                  />
+                  <label class="filter-label">Vendor</label>
+                  <input id="b_vendor" class="filter-input" placeholder="canonical" />
                 </div>
-                <label class="flex items-center gap-2">
-                  <input id="f_kev" type="checkbox" class="h-4 w-4" /><span class="text-sm">KEV only</span>
-                </label>
-                <button id="f_clear" class="btn btn--ghost ml-auto">Clear</button>
+                <div>
+                  <label class="filter-label">Product</label>
+                  <input id="b_product" class="filter-input" placeholder="ubuntu_linux" />
+                </div>
+                <div>
+                  <label class="filter-label">Version</label>
+                  <input id="b_version" class="filter-input" placeholder="*" />
+                </div>
+                <div>
+                  <label class="filter-label">Update</label>
+                  <input id="b_update" class="filter-input" placeholder="*" />
+                </div>
+                <div>
+                  <label class="filter-label">Edition</label>
+                  <input id="b_edition" class="filter-input" placeholder="*" />
+                </div>
+                <div>
+                  <label class="filter-label">Language</label>
+                  <input id="b_language" class="filter-input" placeholder="*" />
+                </div>
+                <div>
+                  <label class="filter-label">SW Edition</label>
+                  <input id="b_sw" class="filter-input" placeholder="*" />
+                </div>
+                <div>
+                  <label class="filter-label">Target SW</label>
+                  <input id="b_tsw" class="filter-input" placeholder="*" />
+                </div>
+                <div>
+                  <label class="filter-label">Target HW</label>
+                  <input id="b_thw" class="filter-input" placeholder="*" />
+                </div>
+                <div>
+                  <label class="filter-label">Other</label>
+                  <input id="b_other" class="filter-input" placeholder="*" />
+                </div>
+                <div class="builder-actions">
+                  <button id="b_build" class="btn btn--ghost">Build CPE</button>
+                  <code id="b_output" class="builder-output">cpe:2.3:o:*:*:*:*:*:*:*:*:*:*</code>
+                  <button id="b_add" class="btn btn--primary">Add to CPEs field</button>
+                </div>
+                <div class="builder-tip">
+                  Tip: leave fields empty to use <code>*</code>. Special chars <code>:</code> and <code>\</code> are auto-escaped.
+                </div>
+                <div id="builderSuggestions" class="builder-suggestions hidden"></div>
               </div>
+            </div>
+          </div>
 
-              <div class="card" id="cpeBuilder">
-                <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-semibold">CPE 2.3 Builder</h3>
-                  <button id="builderToggle" class="link">Hide/Show</button>
-                </div>
-                <div id="builderBody" class="builder-grid">
-                  <div>
-                    <label class="filter-label">Part</label>
-                    <select id="b_part" class="filter-input">
-                      <option value="a">a (application)</option>
-                      <option value="o" selected>o (operating system)</option>
-                      <option value="h">h (hardware)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="filter-label">Vendor</label>
-                    <input id="b_vendor" class="filter-input" placeholder="canonical" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Product</label>
-                    <input id="b_product" class="filter-input" placeholder="ubuntu_linux" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Version</label>
-                    <input id="b_version" class="filter-input" placeholder="*" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Update</label>
-                    <input id="b_update" class="filter-input" placeholder="*" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Edition</label>
-                    <input id="b_edition" class="filter-input" placeholder="*" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Language</label>
-                    <input id="b_language" class="filter-input" placeholder="*" />
-                  </div>
-                  <div>
-                    <label class="filter-label">SW Edition</label>
-                    <input id="b_sw" class="filter-input" placeholder="*" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Target SW</label>
-                    <input id="b_tsw" class="filter-input" placeholder="*" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Target HW</label>
-                    <input id="b_thw" class="filter-input" placeholder="*" />
-                  </div>
-                  <div>
-                    <label class="filter-label">Other</label>
-                    <input id="b_other" class="filter-input" placeholder="*" />
-                  </div>
-                  <div class="builder-actions">
-                    <button id="b_build" class="btn btn--ghost">Build CPE</button>
-                    <code id="b_output" class="builder-output">cpe:2.3:o:*:*:*:*:*:*:*:*:*:*:*</code>
-                    <button id="b_add" class="btn btn--primary">Add to CPEs field</button>
-                  </div>
-                  <div class="builder-tip">
-                    Tip: leave fields empty to use <code>*</code>. Special chars <code>:</code> and <code>\</code> are auto-escaped.
-                  </div>
-                </div>
+          <div class="lg:col-span-2 space-y-3">
+            <div id="filtersBox" class="card flex flex-wrap gap-3 items-end">
+              <div>
+                <label class="filter-label">Search</label>
+                <input id="f_text" class="filter-input" placeholder="CVE, text, CPE" />
               </div>
+              <div>
+                <label class="filter-label">Severity</label>
+                <select id="f_sev" class="filter-input">
+                  <option value="">All</option>
+                  <option>Critical</option>
+                  <option>High</option>
+                  <option>Medium</option>
+                  <option>Low</option>
+                  <option>None</option>
+                </select>
+              </div>
+              <div>
+                <label class="filter-label">Min score</label>
+                <input id="f_score" type="number" min="0" max="10" step="0.1" class="filter-input w-24" placeholder="e.g. 7.0" />
+              </div>
+              <label class="flex items-center gap-2">
+                <input id="f_kev" type="checkbox" class="h-4 w-4" /><span class="text-sm">KEV only</span>
+              </label>
+              <div class="ml-auto flex gap-2">
+                <button id="btnExportCsv" class="btn btn--ghost" type="button">Export CSV</button>
+                <button id="btnExportNdjson" class="btn btn--ghost" type="button">Export NDJSON</button>
+                <button id="f_clear" class="btn btn--ghost" type="button">Clear</button>
+              </div>
+              <div id="filterPills" class="w-full flex flex-wrap gap-2 mt-2"></div>
             </div>
 
             <div class="card">
               <div class="flex items-center justify-between px-2">
                 <div>
                   <div class="text-base font-semibold">
-                    Results (<span id="resCount">{{ results|length }}</span>)
+                    Results (<span id="resCount">0</span>)
                   </div>
-                  <div class="text-xs text-slate-500">
-                    Window: {{ window_label }} • Click a row to open details above
-                  </div>
+                  <div class="text-xs text-slate-500" id="windowLabel">Window: —</div>
                 </div>
                 <div class="text-xs text-slate-500">Click headers to sort</div>
               </div>
@@ -327,13 +260,14 @@
                 <table id="resTable" class="results-table">
                   <thead>
                     <tr>
-                      <th class="sortable" data-k="cve">CVE</th>
+                      <th class="sortable" data-k="id">CVE</th>
                       <th>KEV</th>
                       <th class="sortable" data-k="sev">Severity</th>
                       <th class="sortable" data-k="score">Score</th>
                       <th class="sortable" data-k="pub">Published</th>
                       <th class="sortable" data-k="mod">Last Modified</th>
                       <th>Matched CPE</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="resBody"></tbody>
@@ -346,11 +280,13 @@
                 <div>
                   <div class="text-lg font-semibold" id="d_cve"></div>
                   <div class="text-xs text-slate-500" id="d_meta"></div>
+                  <div class="text-xs text-slate-500" id="d_matched"></div>
                 </div>
                 <div class="flex items-center gap-2">
                   <button id="btnPrev" class="btn btn--ghost">&larr; Prev</button>
                   <button id="btnNext" class="btn btn--ghost">Next &rarr;</button>
                   <a id="d_link" target="_blank" class="btn btn--primary">Open on NVD</a>
+                  <button id="btnCopyJson" class="btn btn--ghost" type="button">Copy JSON</button>
                 </div>
               </div>
               <div class="prose max-w-none">
@@ -362,12 +298,12 @@
                 </div>
               </div>
             </div>
-            {% endif %}
           </div>
         </div>
       </main>
     </div>
 
+    <script id="BOOTSTRAP" type="application/json">{{ bootstrap|tojson }}</script>
     <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
   </body>
 </html>

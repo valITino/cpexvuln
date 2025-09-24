@@ -4,6 +4,7 @@ from typing import Tuple, Dict
 from .config import NVD_BACKLOG_RESET, DAILY_LOOKBACK_HOURS, LONG_BACKFILL_DAYS, BACKFILL_PERIOD_DAYS
 from .utils import now_utc, parse_iso
 
+
 def plan_window(state_entry: Dict, mode_auto: bool) -> Tuple[datetime, bool]:
     """
     (since_dt, is_long_backfill)

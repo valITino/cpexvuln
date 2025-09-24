@@ -28,11 +28,11 @@ try:
     from app.nvd import build_session
     from app.utils import load_json, save_json, now_utc, hash_for_cpes, ensure_dir, read_cpes_file
     from app.config import (
-        WATCHLISTS_FILE,
         STATE_FILE,
         OUT_DIR,
         DAILY_LOOKBACK_HOURS,
         LONG_BACKFILL_DAYS,
+        EXTENDED_LOOKBACK_DAYS,
     )
 except Exception as e:
     # Helpful message if the package can't be imported
@@ -69,7 +69,12 @@ def main():
     runp = sub.add_parser("run", help="Run a one-off scan from a CPE file")
     add_common_flags(runp)
     runp.add_argument("--cpes-file", required=True, help="Text file with one CPE per line (or comma separated)")
-    runp.add_argument("--win", choices=["24h", "90d"], default="24h", help="Window to scan (24h or 90d)")
+    runp.add_argument(
+        "--win",
+        choices=["24h", "90d", "120d"],
+        default="24h",
+        help="Window to scan (24h, 90d, or 120d)",
+    )
     runp.add_argument("--out-dir", default=OUT_DIR, help="Directory to write NDJSON files")
 
     args = ap.parse_args()
@@ -105,8 +110,12 @@ def main():
 
         # Pick window
         now = now_utc()
-        since = now - (timedelta(hours=DAILY_LOOKBACK_HOURS) if args.win == "24h"
-                       else timedelta(days=LONG_BACKFILL_DAYS))
+        if args.win == "24h":
+            since = now - timedelta(hours=DAILY_LOOKBACK_HOURS)
+        elif args.win == "90d":
+            since = now - timedelta(days=LONG_BACKFILL_DAYS)
+        else:
+            since = now - timedelta(days=EXTENDED_LOOKBACK_DAYS)
 
         # Stateful dedupe per unique CPE set
         state_all = load_json(STATE_FILE, {})
