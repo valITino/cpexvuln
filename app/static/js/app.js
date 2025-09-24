@@ -51,6 +51,7 @@
       searchInput: document.getElementById('wlSearch'),
       selectModeBtn: document.getElementById('selectMode'),
       selectAllBox: document.getElementById('wlSelectAll'),
+      deleteSelectedBtn: document.getElementById('btnDeleteSelected'),
       newWatchBtn: document.getElementById('btnNewWatch'),
       newProjectBtn: document.getElementById('btnNewProject'),
       collapseAllBtn: document.getElementById('btnCollapseAll'),
@@ -665,6 +666,8 @@
         showAlert('Watchlist deleted.', 'success', 2000);
       } catch (err) {
         console.error('Delete failed', err);
+      } finally {
+        updateBulkState();
       }
     }
 
@@ -928,14 +931,22 @@
       const selectedVisible = visibleIds.filter((id) => state.selectedIds.has(id));
       dom.selectAllBox.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
       dom.selectAllBox.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
+      if (dom.deleteSelectedBtn) {
+        dom.deleteSelectedBtn.disabled = !state.manageMode || state.selectedIds.size === 0;
+      }
     }
 
     function toggleSelectMode(on) {
       state.manageMode = on;
       dom.selectModeBtn.textContent = on ? 'Done' : 'Select';
       dom.selectAllBox.disabled = !on;
+      if (dom.deleteSelectedBtn) {
+        dom.deleteSelectedBtn.classList.toggle('hidden', !on);
+      }
       if (!on) {
         state.selectedIds.clear();
+        dom.selectAllBox.checked = false;
+        dom.selectAllBox.indeterminate = false;
       }
       renderSidebar();
       updateBulkState();
@@ -960,6 +971,8 @@
         showAlert('Watchlists deleted.', 'success', 2000);
       } catch (err) {
         console.error('Bulk delete failed', err);
+      } finally {
+        updateBulkState();
       }
     }
 
@@ -1142,6 +1155,7 @@
             }
           }
         });
+        updateBulkState();
       });
 
       dom.newWatchBtn?.addEventListener('click', (evt) => {
@@ -1182,6 +1196,11 @@
       dom.btnDeleteWatch?.addEventListener('click', (evt) => {
         evt.preventDefault();
         deleteCurrentWatch();
+      });
+
+      dom.deleteSelectedBtn?.addEventListener('click', (evt) => {
+        evt.preventDefault();
+        bulkDelete();
       });
 
       dom.filterText?.addEventListener('input', applyFilters);
