@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
+import logging
+
 from .utils import iso, now_utc
 from .nvd import (
     extract_affected_cpes,
@@ -10,6 +12,9 @@ from .nvd import (
     is_kev,
     pick_preferred_cvss,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def run_scan(
@@ -26,8 +31,14 @@ def run_scan(
     min_score: Optional[float] = None,
     is_vulnerable: bool = False,
     extra_params: Optional[Dict[str, Any]] = None,
-) -> Tuple[List[dict], dict]:
-    """Run a scan across all provided CPE strings."""
+) -> Tuple[List[dict], dict, List[Dict[str, str]]]:
+    """Run a scan across all provided CPE strings.
+
+    Returns a tuple of ``(results, updated_state, issues)`` where ``issues`` is a
+    list of dictionaries describing recoverable errors that occurred while
+    talking to the NVD API.  Callers can use these to surface actionable
+    diagnostics to the user instead of silently swallowing failures.
+    """
 
     now = now_utc()
     entry = state_all.get(state_key) or {}
@@ -36,6 +47,7 @@ def run_scan(
 
     results: Dict[str, Dict[str, Any]] = {}
     any_success = False
+    issues: List[Dict[str, str]] = []
     extra_params = extra_params or {}
 
     for cpe in cpes:
@@ -52,7 +64,9 @@ def run_scan(
                 extra_params=extra_params,
             )
         except Exception as exc:  # pragma: no cover - network edge cases
-            print(f"[WARN] request failed for {cpe}: {exc}")
+            message = f"{type(exc).__name__}: {exc}"
+            logger.exception("NVD request failed for %s", cpe)
+            issues.append({"cpe": cpe, "message": message})
             continue
 
         any_success = True
@@ -134,4 +148,4 @@ def run_scan(
         out.append(record)
 
     out.sort(key=lambda x: (x.get("lastModified") or x.get("published") or ""), reverse=True)
-    return out, updated
+    return out, updated, issues

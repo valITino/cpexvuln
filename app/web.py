@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import os
 import secrets
 import uuid
@@ -19,6 +20,7 @@ from flask import (
     request,
     session,
 )
+from werkzeug.exceptions import HTTPException
 
 from .config import (
     DAILY_LOOKBACK_HOURS,
@@ -43,6 +45,9 @@ from .utils import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 QUERY_PARAM_KEYS = (
     "cveId",
     "cweId",
@@ -63,6 +68,23 @@ def create_app(args) -> Flask:
     )
     app.secret_key = "dev-" + uuid.uuid4().hex
     app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
+
+    def wants_json_response() -> bool:
+        return request.path.startswith("/api/")
+
+    @app.errorhandler(HTTPException)
+    def _handle_http_exception(exc: HTTPException):
+        if wants_json_response():
+            logger.warning("API error on %s: %s", request.path, exc.description)
+            return json_response({"error": exc.description or exc.name}, status=exc.code)
+        return exc
+
+    @app.errorhandler(Exception)
+    def _handle_generic_exception(exc: Exception):
+        logger.exception("Unhandled error on %s", request.path)
+        if wants_json_response():
+            return json_response({"error": "Internal server error"}, status=500)
+        raise exc
 
     # ------------------------------------------------------------------ helpers
 
@@ -239,32 +261,62 @@ def create_app(args) -> Flask:
                 query_params[key] = value
         if options.get("hasKev"):
             query_params["hasKev"] = "true"
-        results, updated_entry = run_scan(
-            cpes=entry["cpes"],
-            state_all=state_all,
-            state_key=state_key,
-            session=session_obj,
-            insecure=bool(options.get("insecure")) or args.insecure,
-            api_key=api_key,
-            since=since,
-            no_rejected=options.get("noRejected", True),
-            kev_only=False,
-            min_score=None,
-            is_vulnerable=options.get("isVulnerable", False),
-            extra_params=query_params,
+        logger.info(
+            "Running watchlist %s (%s) for %s",
+            entry.get("id"),
+            entry.get("name"),
+            label,
         )
+        try:
+            results, updated_entry, issues = run_scan(
+                cpes=entry["cpes"],
+                state_all=state_all,
+                state_key=state_key,
+                session=session_obj,
+                insecure=bool(options.get("insecure")) or args.insecure,
+                api_key=api_key,
+                since=since,
+                no_rejected=options.get("noRejected", True),
+                kev_only=False,
+                min_score=None,
+                is_vulnerable=options.get("isVulnerable", False),
+                extra_params=query_params,
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.exception(
+                "Scan failed for watchlist %s (%s)", entry.get("id"), entry.get("name")
+            )
+            abort(502, f"Scan failed: {exc}")
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
             proj_state = state_all.setdefault("projects", {})
             proj_state[entry["projectId"]] = iso(now_utc())
             save_json(STATE_FILE, state_all)
-        return results, label
+        detailed_issues: List[Dict[str, Any]] = []
+        for issue in issues:
+            item = {
+                "cpe": issue.get("cpe"),
+                "message": issue.get("message") or "Unknown error",
+                "watchlistId": entry.get("id"),
+                "watchlistName": entry.get("name"),
+                "window": label,
+            }
+            detailed_issues.append(item)
+            logger.warning(
+                "Watchlist %s (%s) encountered an issue for %s: %s",
+                entry.get("id"),
+                entry.get("name"),
+                item.get("cpe"),
+                item.get("message"),
+            )
+        return results, label, detailed_issues
 
     def bootstrap_payload(
         data: Dict[str, Any],
         current_id: Optional[str] = None,
         results=None,
         window_label: str = "",
+        issues: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         return {
             "projects": [serialize_project(p) for p in data.get("projects", [])],
@@ -273,6 +325,7 @@ def create_app(args) -> Flask:
             "results": results,
             "windowLabel": window_label,
             "csrfToken": _csrf_token(),
+            "issues": issues or [],
         }
 
     def json_response(data: Dict[str, Any], status: int = 200):
@@ -292,13 +345,20 @@ def create_app(args) -> Flask:
         watch_id = request.args.get("watch")
         results = None
         label = ""
+        issues: List[Dict[str, Any]] = []
         if watch_id:
             entry = find_watchlist(data, watch_id)
             if entry:
-                results, label = run_watch(entry, request.args.get("win", "24h"))
+                results, label, issues = run_watch(entry, request.args.get("win", "24h"))
         return render_template(
             "index.html",
-            bootstrap=bootstrap_payload(data, watch_id if results else None, results, label),
+            bootstrap=bootstrap_payload(
+                data,
+                watch_id if results else None,
+                results,
+                label,
+                issues,
+            ),
         )
 
     @app.get("/api/watchlists")
@@ -489,8 +549,8 @@ def create_app(args) -> Flask:
         entry = find_watchlist(data, wid)
         if not entry:
             abort(404, "Watchlist not found")
-        results, label = run_watch(entry, window)
-        return json_response({"results": results, "windowLabel": label})
+        results, label, issues = run_watch(entry, window)
+        return json_response({"results": results, "windowLabel": label, "issues": issues})
 
     @app.get("/api/cpe_suggest")
     def api_cpe_suggest():
@@ -548,7 +608,13 @@ def create_app(args) -> Flask:
         if not entry:
             return Response("Not found", status=404)
         window = request.args.get("win", "24h")
-        results, _ = run_watch(entry, window)
+        results, _, issues = run_watch(entry, window)
+        if issues and not results:
+            return Response(
+                "Scan failed: see server logs for details",
+                status=502,
+                mimetype="text/plain",
+            )
         body = json.dumps(results, indent=2, ensure_ascii=False)
         return Response(
             body,
@@ -563,7 +629,13 @@ def create_app(args) -> Flask:
         if not entry:
             return Response("Not found", status=404)
         window = request.args.get("win", "24h")
-        results, _ = run_watch(entry, window)
+        results, _, issues = run_watch(entry, window)
+        if issues and not results:
+            return Response(
+                "Scan failed: see server logs for details",
+                status=502,
+                mimetype="text/plain",
+            )
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([

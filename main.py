@@ -14,12 +14,16 @@ import os
 import sys
 import argparse
 import json
+import logging
 from datetime import timedelta
 
 # --- make sure we can import the package when running as a script ---
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 try:
     # Absolute imports from the package
@@ -121,7 +125,7 @@ def main():
         state_all = load_json(STATE_FILE, {})
         state_key = f"nvd:{hash_for_cpes(cpes)}"
 
-        results, updated_entry = run_scan(
+        results, updated_entry, issues = run_scan(
             cpes=cpes,
             state_all=state_all,
             state_key=state_key,
@@ -132,6 +136,10 @@ def main():
             no_rejected=True,
             kev_only=False,
         )
+
+        if issues:
+            for issue in issues:
+                logger.error("NVD request failed for %s: %s", issue.get("cpe"), issue.get("message"))
 
         # Save state
         if updated_entry.get("per_cpe"):

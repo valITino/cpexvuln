@@ -35,6 +35,7 @@
       originalResults: bootstrap.results || [],
       filteredResults: [],
       windowLabel: bootstrap.windowLabel || '',
+      initialIssues: bootstrap.issues || [],
       filters: { text: '', severity: '', minScore: '', kevOnly: false },
       sortKey: 'mod',
       sortDir: -1,
@@ -200,21 +201,63 @@
         opts.method = options.method;
       }
       if (options.body !== undefined) {
-        opts.headers['Content-Type'] = 'application/json';
-        opts.body = toJsonBody(options.body);
+        if (options.body instanceof FormData) {
+          opts.body = options.body;
+        } else {
+          opts.headers['Content-Type'] = 'application/json';
+          opts.body = toJsonBody(options.body);
+        }
       }
       try {
         const res = await fetch(url, opts);
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || res.statusText);
+        const text = await res.text();
+        let data = {};
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (err) {
+            data = {};
+          }
         }
-        const data = await res.json();
+        if (!res.ok) {
+          const message =
+            (data && (data.error || data.message)) ||
+            text ||
+            res.statusText ||
+            'Request failed';
+          const error = new Error(message);
+          error.status = res.status;
+          throw error;
+        }
         return data;
       } catch (err) {
         showAlert(err.message || 'Request failed', 'error');
         throw err;
       }
+    }
+
+    function formatIssue(issue) {
+      if (!issue) return 'Unknown issue';
+      if (typeof issue === 'string') return issue;
+      const parts = [];
+      if (issue.watchlistName) {
+        parts.push(`[${issue.watchlistName}]`);
+      }
+      if (issue.window) {
+        parts.push(issue.window);
+      }
+      if (issue.cpe) {
+        parts.push(`CPE ${issue.cpe}`);
+      }
+      const prefix = parts.length ? `${parts.join(' ')}: ` : '';
+      return `${prefix}${issue.message || 'Unknown error'}`;
+    }
+
+    function displayIssues(issues) {
+      if (!Array.isArray(issues) || !issues.length) return;
+      issues.forEach((issue) => {
+        showAlert(formatIssue(issue), 'warning', 10000);
+      });
     }
 
     function saveCollapsed() {
@@ -692,6 +735,10 @@
         applyFilters();
         showAlert(`Fetched ${state.originalResults.length} CVEs.`, 'success', 2000);
         dom.windowLabel.textContent = `Window: ${state.windowLabel || '—'}`;
+        displayIssues(result.issues);
+        if (!state.originalResults.length && Array.isArray(result.issues) && result.issues.length) {
+          showAlert('Scan completed with errors. No CVEs were retrieved.', 'error', 10000);
+        }
       } catch (err) {
         console.error('Run failed', err);
       } finally {
@@ -1320,6 +1367,7 @@
       if (state.windowLabel) {
         dom.windowLabel.textContent = `Window: ${state.windowLabel}`;
       }
+      displayIssues(state.initialIssues);
     }
 
     return { init };
