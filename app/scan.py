@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import logging
+import requests
 
 from .utils import iso, now_utc
 from .nvd import (
@@ -64,9 +65,39 @@ def run_scan(
                 extra_params=extra_params,
             )
         except Exception as exc:  # pragma: no cover - network edge cases
-            message = f"{type(exc).__name__}: {exc}"
             logger.exception("NVD request failed for %s", cpe)
-            issues.append({"cpe": cpe, "message": message})
+            kind = getattr(exc, "kind", None)
+            if not kind:
+                if isinstance(exc, requests.HTTPError):
+                    kind = "http_error"
+                elif isinstance(exc, requests.Timeout):
+                    kind = "timeout"
+                elif isinstance(exc, requests.exceptions.SSLError):
+                    kind = "tls_error"
+                else:
+                    kind = "unexpected_error"
+
+            status_code = getattr(exc, "status_code", None)
+            if status_code is None and isinstance(exc, requests.HTTPError):
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+
+            issue: Dict[str, Any] = {
+                "cpe": cpe,
+                "kind": kind,
+                "message": str(exc) or type(exc).__name__,
+            }
+            if status_code is not None:
+                issue["status_code"] = status_code
+
+            details = getattr(exc, "details", None)
+            if details:
+                issue["details"] = details
+
+            hint = getattr(exc, "hint", None)
+            if hint:
+                issue["hint"] = hint
+
+            issues.append(issue)
             continue
 
         any_success = True
