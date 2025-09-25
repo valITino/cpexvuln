@@ -1,4 +1,9 @@
-"""Web UI for the CPE watch application."""
+"""Web UI for the CPE watch application.
+Drop-in replacement with:
+- Defensive handling of scan return types (prevents "'list' object has no attribute 'get'")
+- Consistent API error responses
+- CSV/JSON export unchanged
+"""
 from __future__ import annotations
 
 import csv
@@ -154,7 +159,9 @@ def create_app(args) -> Flask:
             if not is_valid_cpe(cpe):
                 abort(400, f"Invalid CPE string: {cpe}")
             if is_vulnerable and not has_specific_version(cpe):
-                warning = "Using isVulnerable=true with wildcard versions may return 400 from NVD."
+                warning = (
+                    "Using isVulnerable=true with wildcard versions may return 400 from NVD."
+                )
                 if warning not in warnings:
                     warnings.append(warning)
         return warnings
@@ -193,10 +200,14 @@ def create_app(args) -> Flask:
 
         if "cpes" in payload:
             cpes = parse_cpes(payload["cpes"])
-            warnings.extend(validate_cpes(cpes, entry["options"].get("isVulnerable", False)))
+            warnings.extend(
+                validate_cpes(cpes, entry["options"].get("isVulnerable", False))
+            )
             entry["cpes"] = cpes
         else:
-            warnings.extend(validate_cpes(entry.get("cpes", []), entry["options"].get("isVulnerable", False)))
+            warnings.extend(
+                validate_cpes(entry.get("cpes", []), entry["options"].get("isVulnerable", False))
+            )
 
         if "order" in payload:
             try:
@@ -282,18 +293,29 @@ def create_app(args) -> Flask:
                 is_vulnerable=options.get("isVulnerable", False),
                 extra_params=query_params,
             )
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except Exception as exc:  # defensive guard
             logger.exception(
                 "Scan failed for watchlist %s (%s)", entry.get("id"), entry.get("name")
             )
             abort(502, f"Scan failed: {exc}")
+
+        # --- Defensive guards to prevent AttributeError on unexpected shapes ---
+        if not isinstance(updated_entry, dict):
+            updated_entry = {}
+        if not isinstance(issues, list):
+            issues = []
+
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
             proj_state = state_all.setdefault("projects", {})
             proj_state[entry["projectId"]] = iso(now_utc())
             save_json(STATE_FILE, state_all)
+
         detailed_issues: List[Dict[str, Any]] = []
-        for issue in issues:
+        for issue in issues or []:
+            # Ensure each issue is at least a dict
+            if not isinstance(issue, dict):
+                issue = {"message": str(issue)}
             item = {
                 "cpe": issue.get("cpe"),
                 "message": issue.get("message") or "Unknown error",

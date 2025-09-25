@@ -5,16 +5,61 @@
         "cpe:2.3:o:cisco:ios:*:*:*:*:*:*:*"
       ],
       "id": "1cefbf3b-723f-4c95-8a29-aacd0efee6a3",
-      "insecure": true,
-      "name": "Cisco"
+      "name": "Cisco",
+      "options": {
+        "apiKey": null,
+        "caBundle": null,
+        "cveId": null,
+        "cvssV3Metrics": null,
+        "cvssV3Severity": null,
+        "cvssV4Metrics": null,
+        "cvssV4Severity": null,
+        "cweId": null,
+        "hasKev": false,
+        "httpProxy": null,
+        "httpsProxy": null,
+        "insecure": true,
+        "isVulnerable": false,
+        "minCvss": 0.0,
+        "noRejected": true,
+        "timeout": null
+      },
+      "order": 0,
+      "projectId": "1308cd59a1ac443485f9557b75621584"
     },
     {
       "cpes": [
         "cpe:2.3:a:microsoft:365_apps:-:*:*:*:enterprise:*:x64:*"
       ],
       "id": "f0f60575-e9a4-4a56-af6a-9ed132b897aa",
-      "insecure": false,
-      "name": "MS Apps"
+      "name": "MS Apps",
+      "options": {
+        "apiKey": null,
+        "caBundle": null,
+        "cveId": null,
+        "cvssV3Metrics": null,
+        "cvssV3Severity": null,
+        "cvssV4Metrics": null,
+        "cvssV4Severity": null,
+        "cweId": null,
+        "hasKev": false,
+        "httpProxy": null,
+        "httpsProxy": null,
+        "insecure": false,
+        "isVulnerable": false,
+        "minCvss": 0.0,
+        "noRejected": true,
+        "timeout": null
+      },
+      "order": 1,
+      "projectId": "1308cd59a1ac443485f9557b75621584"
+    }
+  ],
+  "projects": [
+    {
+      "id": "1308cd59a1ac443485f9557b75621584",
+      "name": "Default",
+      "order": 0
     }
   ]
 }

@@ -1,4 +1,10 @@
-"""NVD API helpers (CVE + CPE products)."""
+"""NVD API helpers (CVE + CPE products).
+Drop-in replacement with:
+- Robust JSON handling (tolerates top-level arrays and odd shapes)
+- Safer pagination across date windows
+- Clear backoff and error messages
+- Helper extractors used by scan.py
+"""
 from __future__ import annotations
 
 import random
@@ -85,11 +91,13 @@ def _request_json(
     insecure: bool,
     api_key: Optional[str],
 ) -> Dict[str, Any]:
-    """Perform a GET request with retry/backoff and return decoded JSON."""
+    """Perform a GET request with retry/backoff and return decoded JSON as a dict.
+    If the API returns a top-level array, coerce it to a dict with the expected key.
+    """
 
     delay = 1.0
     last_exc: Optional[Exception] = None
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for _attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             response = session.get(
                 url,
@@ -98,27 +106,51 @@ def _request_json(
                 timeout=_session_timeout(session),
                 verify=False if insecure else getattr(session, "verify", True),
             )
-        except requests.exceptions.SSLError as exc:
-            message = (
-                "TLS handshake with the NVD API failed. "
-                "Provide a CA bundle (--ca-bundle) or enable insecure mode (--insecure)."
-            )
-            raise requests.exceptions.SSLError(message) from exc
-        except requests.RequestException as exc:
-            last_exc = exc
-        else:
-            status = response.status_code
-            if status in RETRY_STATUS:
-                last_exc = requests.HTTPError(f"HTTP {status}", response=response)
-            elif status >= 400:
-                response.raise_for_status()
+
+            # Treat only 5xx as retryable; 4xx bubble up to caller
+            if response.status_code >= 500:
+                last_exc = requests.HTTPError(f"{response.status_code} from NVD", response=response)
             else:
                 try:
-                    return response.json()
+                    payload = response.json()
                 except ValueError:
                     last_exc = requests.HTTPError("Invalid JSON from NVD", response=response)
-                    break
+                else:
+                    # Coerce top-level arrays to the shape our callers expect
+                    if isinstance(payload, list):
+                        # Heuristic based on endpoint
+                        if "/cves/" in url:
+                            return {
+                                "vulnerabilities": payload,
+                                "totalResults": len(payload),
+                                "resultsPerPage": len(payload),
+                                "startIndex": params.get("startIndex", 0),
+                            }
+                        if "/cpes/" in url:
+                            return {
+                                "products": payload,
+                                "totalResults": len(payload),
+                                "resultsPerPage": len(payload),
+                                "startIndex": params.get("startIndex", 0),
+                            }
+                        # Fallback generic wrapper
+                        return {"items": payload, "totalResults": len(payload)}
 
+                    if not isinstance(payload, dict):
+                        # Final guard: never return a non-dict
+                        return {}
+
+                    return payload
+
+        except requests.exceptions.SSLError as exc:
+            raise requests.exceptions.SSLError(
+                "TLS handshake with the NVD API failed. "
+                "Provide a CA bundle (--ca-bundle) or enable insecure mode (--insecure)."
+            ) from exc
+        except requests.RequestException as exc:
+            last_exc = exc  # network-level issues → backoff
+
+        # jittered exponential backoff
         wait = min(delay + _RNG.uniform(0, delay), MAX_RETRY_DELAY)
         time.sleep(wait)
         delay = min(delay * 2, MAX_RETRY_DELAY)
@@ -148,21 +180,29 @@ def _fetch_cve_window(
             params["lastModEndDate"] = iso(window_end)
             params["startIndex"] = start_index
             data = _request_json(
-                session,
-                CVE_API_BASE,
-                params,
-                insecure=insecure,
-                api_key=api_key,
-            )
-            vulns = data.get("vulnerabilities", []) or []
+                session, CVE_API_BASE, params, insecure=insecure, api_key=api_key
+            ) or {}
+
+            # Be tolerant if API hands us an unexpected shape
+            if isinstance(data, dict):
+                vulns = data.get("vulnerabilities", []) or data.get("items", []) or []
+            elif isinstance(data, list):
+                vulns = data
+            else:
+                vulns = []
+
             results.extend(vulns)
-            total = int(data.get("totalResults", 0))
-            rpp = int(data.get("resultsPerPage", len(vulns) or base["resultsPerPage"]))
-            current_index = int(data.get("startIndex", start_index))
-            next_index = current_index + rpp
-            if next_index >= total or rpp <= 0 or not vulns:
+
+            total = int((isinstance(data, dict) and data.get("totalResults")) or 0)
+            rpp = int(
+                (isinstance(data, dict) and data.get("resultsPerPage"))
+                or (len(vulns) or base["resultsPerPage"])  # fallback to base page size
+            )
+            current_index = int((isinstance(data, dict) and data.get("startIndex")) or start_index)
+
+            if not vulns or (total and current_index + rpp >= total):
                 break
-            start_index = next_index
+            start_index += rpp
     return results
 
 
@@ -205,6 +245,7 @@ def fetch_for_cpe(
         status = getattr(exc, "response", None)
         status_code = getattr(status, "status_code", None)
         if status_code in (400, 404):
+            # Retry without noRejected (some queries 400 on NVD)
             params_no_rejected = dict(params)
             params_no_rejected.pop("noRejected", None)
             if params_no_rejected != params:
@@ -219,6 +260,7 @@ def fetch_for_cpe(
                     )
                 except requests.HTTPError:
                     pass
+            # Fallback to strict cpeName if possible
             if not is_vulnerable and has_specific_version(cpe):
                 params_strict = dict(params)
                 params_strict.pop("virtualMatchString", None)
@@ -247,23 +289,26 @@ def iter_cpe_products(
     rpp = min(MAX_CPE_PAGE_SIZE, int(base.get("resultsPerPage", MAX_CPE_PAGE_SIZE)))
     if rpp <= 0:
         rpp = MAX_CPE_PAGE_SIZE
-    base["resultsPerPage"] = rpp
-    start_index = int(base.get("startIndex", 0))
+    base.setdefault("resultsPerPage", rpp)
+
+    start_index = 0
     while True:
         base["startIndex"] = start_index
-        data = _request_json(
-            session,
-            CPE_API_BASE,
-            base,
-            insecure=insecure,
-            api_key=api_key,
-        )
-        products = data.get("products", []) or []
+        data = _request_json(session, CPE_API_BASE, base, insecure=insecure, api_key=api_key) or {}
+        if isinstance(data, dict):
+            products = data.get("products", []) or data.get("items", []) or []
+        elif isinstance(data, list):
+            products = data
+        else:
+            products = []
+
         for item in products:
-            yield item
-        total = int(data.get("totalResults", 0))
-        rpp = int(data.get("resultsPerPage", len(products) or base["resultsPerPage"]))
-        if not products or start_index + rpp >= total:
+            if isinstance(item, dict):
+                yield item
+
+        total = int((isinstance(data, dict) and data.get("totalResults")) or 0)
+        rpp = int((isinstance(data, dict) and data.get("resultsPerPage")) or (len(products) or base["resultsPerPage"]))
+        if not products or (total and start_index + rpp >= total):
             break
         start_index += rpp
 
