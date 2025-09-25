@@ -31,4 +31,5 @@ def test_run_scan_collects_issues(monkeypatch, sample_cpe):
     assert results == []
     assert isinstance(updated, dict)
     assert issues and issues[0]["cpe"] == sample_cpe
+    assert issues[0]["kind"] == "unexpected_error"
     assert "network boom" in issues[0]["message"]

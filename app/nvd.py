@@ -32,6 +32,78 @@ MAX_ATTEMPTS = 6
 _RNG = random.SystemRandom()
 
 
+class NVDAPIError(Exception):
+    """Base exception carrying rich metadata about NVD failures."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: str,
+        details: Optional[str] = None,
+        status_code: Optional[int] = None,
+        hint: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.details = details
+        self.status_code = status_code
+        self.hint = hint
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "kind": self.kind,
+            "message": str(self),
+        }
+        if self.status_code is not None:
+            payload["status_code"] = self.status_code
+        if self.details:
+            payload["details"] = self.details
+        if self.hint:
+            payload["hint"] = self.hint
+        return payload
+
+
+class NVDAPIHTTPError(requests.HTTPError, NVDAPIError):
+    """HTTP error from the NVD API enriched with diagnostics."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        response: Optional[requests.Response] = None,
+        status_code: Optional[int] = None,
+        kind: str = "http_error",
+        details: Optional[str] = None,
+        hint: Optional[str] = None,
+    ) -> None:
+        requests.HTTPError.__init__(self, message, response=response)
+        status = status_code or getattr(response, "status_code", None)
+        NVDAPIError.__init__(
+            self,
+            message,
+            kind=kind,
+            details=details,
+            status_code=status,
+            hint=hint,
+        )
+
+
+def _response_hint(response: requests.Response) -> Optional[str]:
+    if not response:
+        return None
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    if isinstance(data, dict):
+        for key in ("message", "detail", "error"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
 def build_session(
     https_proxy: Optional[str] = None,
     http_proxy: Optional[str] = None,
@@ -107,14 +179,38 @@ def _request_json(
                 verify=False if insecure else getattr(session, "verify", True),
             )
 
-            # Treat only 5xx as retryable; 4xx bubble up to caller
-            if response.status_code >= 500:
-                last_exc = requests.HTTPError(f"{response.status_code} from NVD", response=response)
+            status = response.status_code
+            if status in RETRY_STATUS:
+                hint = _response_hint(response)
+                kind = "rate_limit" if status == 429 else "server_error"
+                last_exc = NVDAPIHTTPError(
+                    f"NVD API returned {status}; will retry",
+                    response=response,
+                    kind=kind,
+                    details=hint,
+                )
             else:
+                try:
+                    response.raise_for_status()
+                except requests.HTTPError as exc:
+                    hint = _response_hint(response)
+                    raise NVDAPIHTTPError(
+                        f"NVD API returned {response.status_code}",
+                        response=response,
+                        kind="client_error" if 400 <= response.status_code < 500 else "server_error",
+                        details=hint,
+                    ) from exc
+
                 try:
                     payload = response.json()
                 except ValueError:
-                    last_exc = requests.HTTPError("Invalid JSON from NVD", response=response)
+                    hint = response.text[:256] if hasattr(response, "text") else None
+                    last_exc = NVDAPIHTTPError(
+                        "NVD API responded with malformed JSON",
+                        response=response,
+                        kind="invalid_json",
+                        details=hint,
+                    )
                 else:
                     # Coerce top-level arrays to the shape our callers expect
                     if isinstance(payload, list):
@@ -143,12 +239,24 @@ def _request_json(
                     return payload
 
         except requests.exceptions.SSLError as exc:
-            raise requests.exceptions.SSLError(
-                "TLS handshake with the NVD API failed. "
-                "Provide a CA bundle (--ca-bundle) or enable insecure mode (--insecure)."
+            raise NVDAPIError(
+                "TLS handshake with the NVD API failed",
+                kind="tls_error",
+                hint="Provide a CA bundle (--ca-bundle) or enable insecure mode (--insecure).",
+                details=str(exc),
             ) from exc
+        except requests.Timeout as exc:
+            last_exc = NVDAPIError(
+                "Timed out waiting for the NVD API",
+                kind="timeout",
+                details=str(exc),
+            )
         except requests.RequestException as exc:
-            last_exc = exc  # network-level issues → backoff
+            last_exc = NVDAPIError(
+                "Network error while communicating with the NVD API",
+                kind="network_error",
+                details=str(exc),
+            )
 
         # jittered exponential backoff
         wait = min(delay + _RNG.uniform(0, delay), MAX_RETRY_DELAY)
@@ -157,7 +265,7 @@ def _request_json(
 
     if last_exc:
         raise last_exc
-    raise requests.HTTPError("NVD request failed after retries")
+    raise NVDAPIError("NVD request failed after retries", kind="unknown")
 
 
 def _fetch_cve_window(
