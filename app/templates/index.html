@@ -175,8 +175,18 @@
 
               <div id="formWarnings" class="text-xs text-amber-600"></div>
 
-              <div class="flex flex-col gap-2">
-                <div class="flex gap-2">
+              <div class="flex flex-col gap-2 run-controls">
+                <div
+                  id="runOverlay"
+                  class="run-overlay hidden"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  <span class="run-overlay__spinner" aria-hidden="true"></span>
+                  <span id="runOverlayLabel" class="run-overlay__label">Scanning…</span>
+                </div>
+                <div class="flex gap-2 run-buttons">
                   <button id="btnRun24" class="cta cta--dark flex-1" type="button">Scan last 24 hours</button>
                   <button id="btnRun90" class="cta cta--accent flex-1" type="button">Scan last 90 days</button>
                 </div>

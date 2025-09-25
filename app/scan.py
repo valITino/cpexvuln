@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
 import logging
@@ -44,11 +45,14 @@ def run_scan(
     now = now_utc()
     entry = state_all.get(state_key) or {}
     per_cpe = dict(entry.get("per_cpe") or {})
+    cached_results = entry.get("last_results") if isinstance(entry, dict) else None
+    last_success = entry.get("last_success") if isinstance(entry, dict) else None
     last_long_rescan = entry.get("last_long_rescan")
 
     results: Dict[str, Dict[str, Any]] = {}
     any_success = False
     issues: List[Dict[str, str]] = []
+    fallback_used = False
     extra_params = extra_params or {}
 
     for cpe in cpes:
@@ -148,7 +152,12 @@ def run_scan(
                     record["cvssSeverity"] = new_metrics.get("baseSeverity")
                     record["cvssVector"] = new_metrics.get("vectorString")
 
-    updated = {"version": 4, "per_cpe": per_cpe}
+    updated: Dict[str, Any] = {"version": 4, "per_cpe": per_cpe}
+    if any_success:
+        updated["last_success"] = iso(now)
+    elif last_success:
+        updated["last_success"] = last_success
+
     if any_success and (now - since).days >= 89:
         updated["last_long_rescan"] = iso(now)
     elif last_long_rescan:
@@ -179,4 +188,27 @@ def run_scan(
         out.append(record)
 
     out.sort(key=lambda x: (x.get("lastModified") or x.get("published") or ""), reverse=True)
+
+    if any_success:
+        updated["last_results"] = deepcopy(out)
+    else:
+        if isinstance(cached_results, list):
+            cached_copy = deepcopy(cached_results)
+            updated["last_results"] = cached_copy
+            if cached_copy:
+                out = cached_copy
+                fallback_used = True
+        if not updated.get("last_results"):
+            updated.pop("last_results", None)
+
+    if fallback_used:
+        fallback_msg = "Using cached results from the last successful scan because the latest request failed."
+        issues.append(
+            {
+                "cpe": ", ".join(sorted(cpes)),
+                "kind": "cached_results",
+                "message": fallback_msg,
+            }
+        )
+
     return out, updated, issues
