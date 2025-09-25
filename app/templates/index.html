@@ -5,66 +5,97 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content="{{ bootstrap.csrfToken }}" />
     <title>NVD CPE Watch</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
   </head>
-  <body class="bg-slate-50 text-slate-900">
-    <div class="h-screen flex">
-      <aside id="sidebar" class="sidebar">
+  <body class="app-body">
+    <div class="app-shell">
+      <div class="shell__bg">
+        <div class="shell__orb shell__orb--primary"></div>
+        <div class="shell__orb shell__orb--secondary"></div>
+      </div>
+      <aside id="sidebar" class="sidebar glass-panel">
         <div class="sidebar__header">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <svg viewBox="0 0 24 24" class="h-5 w-5 text-indigo-600" fill="none" stroke="currentColor" stroke-width="2">
+          <div class="sidebar__identity">
+            <div class="sidebar__brand">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="sidebar__brand-icon" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 7h16M4 12h16M4 17h10" />
               </svg>
-              <span class="font-semibold">CPE Watch</span>
+              <div>
+                <span class="sidebar__brand-title">CPE Watch</span>
+                <span class="sidebar__brand-subtitle">NVD monitoring cockpit</span>
+              </div>
             </div>
-            <button id="btnNewWatch" class="btn btn--primary">New</button>
+            <button id="btnNewWatch" class="btn btn--primary" type="button">New</button>
           </div>
 
-          <div class="mt-3 flex gap-2">
-            <div class="relative flex-1">
+          <div class="sidebar__search">
+            <div class="sidebar__search-field">
               <input id="wlSearch" class="search" placeholder="Search watchlists" type="search" />
-              <svg viewBox="0 0 24 24" class="search__icon" fill="none" stroke="currentColor" stroke-width="2">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="search__icon" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="11" cy="11" r="8"></circle>
                 <path d="m21 21-4.3-4.3"></path>
               </svg>
             </div>
-            <button id="selectMode" class="btn btn--ghost">Select</button>
-            <button
-              id="btnDeleteSelected"
-              class="btn btn--danger hidden"
-              title="Delete selected watchlists"
-              type="button"
-            >
-              Delete
-            </button>
-            <button id="btnNewProject" class="btn btn--ghost" title="Create project">New project</button>
+            <div class="sidebar__search-actions">
+              <button id="selectMode" class="btn btn--ghost" type="button">Select</button>
+              <button
+                id="btnDeleteSelected"
+                class="btn btn--danger hidden"
+                title="Delete selected watchlists"
+                type="button"
+              >
+                Delete
+              </button>
+              <button id="btnNewProject" class="btn btn--ghost" type="button" title="Create project">New project</button>
+            </div>
           </div>
 
-          <div class="mt-2 flex items-center gap-3 text-xs text-slate-600">
-            <label class="flex items-center gap-2">
-              <input id="wlSelectAll" type="checkbox" class="h-4 w-4" disabled />
-              <span>All</span>
+          <div class="sidebar__toggles">
+            <label class="sidebar__toggle">
+              <input id="wlSelectAll" type="checkbox" class="sidebar__toggle-box" disabled />
+              <span>Select all</span>
             </label>
-            <span class="text-slate-300">•</span>
-            <button class="link" id="btnCollapseAll">Collapse all</button>
-            <span class="text-slate-300">•</span>
-            <button class="link" id="btnExpandAll">Expand all</button>
+            <div class="sidebar__toggle-divider"></div>
+            <button class="link" id="btnCollapseAll" type="button">Collapse all</button>
+            <div class="sidebar__toggle-divider"></div>
+            <button class="link" id="btnExpandAll" type="button">Expand all</button>
           </div>
         </div>
-        <div id="projectsContainer" class="p-3 space-y-3 overflow-y-auto flex-1"></div>
-        <div class="p-3 border-t text-xs text-slate-500">
-          Shortcuts: <kbd class="kbd">N</kbd> new watch, <kbd class="kbd">P</kbd> new project, <kbd class="kbd">A</kbd> select all, <kbd class="kbd">Del</kbd> delete selected.
+        <div id="projectsContainer" class="sidebar__projects"></div>
+        <div class="sidebar__footer">
+          <div>Shortcuts</div>
+          <div class="sidebar__shortcuts">
+            <span><kbd class="kbd">N</kbd> new watch</span>
+            <span><kbd class="kbd">P</kbd> new project</span>
+            <span><kbd class="kbd">A</kbd> select all</span>
+            <span><kbd class="kbd">Del</kbd> delete selected</span>
+          </div>
         </div>
       </aside>
 
-      <main class="flex-1 p-6 overflow-y-auto">
-        <div id="alerts" class="space-y-2"></div>
+      <main class="workspace">
+        <header class="workspace__header">
+          <div>
+            <p class="workspace__eyebrow">Live vulnerability intelligence</p>
+            <h1 class="workspace__title">NVD CPE Watch</h1>
+            <p class="workspace__subtitle">
+              Curate watchlists, trigger scans, and surface KEV insights with a streamlined workflow built for response teams.
+            </p>
+          </div>
+        </header>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div class="lg:col-span-1 space-y-6">
-            <form id="watchForm" class="card space-y-3">
+        <section id="alerts" class="alerts"></section>
+
+        <div class="workspace__grid">
+          <div class="workspace__column workspace__column--narrow">
+            <form id="watchForm" class="card glass-panel stack">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <input type="hidden" id="formWatchId" />
               <h2 class="text-base font-semibold mb-1 flex items-center justify-between">
@@ -81,7 +112,7 @@
               <label class="field-label" for="formCpes">CPEs (comma-separated)</label>
               <textarea id="formCpes" rows="4" class="field-input" placeholder="cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:x64:*, cpe:2.3:o:canonical:ubuntu_linux:*:*:*:*:*:*:*"></textarea>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="options-grid">
                 <label class="flex items-center gap-2"><input id="optNoRejected" type="checkbox" class="h-4 w-4" checked />No rejected</label>
                 <label class="flex items-center gap-2"><input id="optIsVulnerable" type="checkbox" class="h-4 w-4" />isVulnerable</label>
                 <label class="flex items-center gap-2"><input id="optHasKev" type="checkbox" class="h-4 w-4" />Has KEV</label>
@@ -91,9 +122,9 @@
               <label class="field-label" for="optMinCvss">Default min CVSS score (UI filter)</label>
               <input id="optMinCvss" type="number" min="0" max="10" step="0.1" class="field-input" placeholder="e.g., 7.0" />
 
-              <details class="mt-2">
-                <summary class="text-sm font-semibold cursor-pointer">Advanced NVD options</summary>
-                <div class="mt-2 space-y-2 text-sm">
+              <details class="panel panel--nested">
+                <summary class="panel__summary">Advanced NVD options</summary>
+                <div class="panel__body">
                   <label class="block">
                     <span class="block mb-1">NVD API key</span>
                     <input id="optApiKey" type="password" autocomplete="off" class="field-input" placeholder="Store securely" />
@@ -155,7 +186,7 @@
               </div>
             </form>
 
-            <div class="card" id="cpeBuilder">
+            <div class="card glass-panel" id="cpeBuilder">
               <div class="flex items-center justify-between">
                 <h3 class="text-sm font-semibold">CPE 2.3 Builder</h3>
                 <button id="builderToggle" class="link">Hide</button>
@@ -222,8 +253,8 @@
             </div>
           </div>
 
-          <div class="lg:col-span-2 space-y-3">
-            <div id="filtersBox" class="card flex flex-wrap gap-3 items-end">
+          <div class="workspace__column workspace__column--wide">
+            <div id="filtersBox" class="card glass-panel filters-box">
               <div>
                 <label class="filter-label">Search</label>
                 <input id="f_text" class="filter-input" placeholder="CVE, text, CPE" />
@@ -246,7 +277,7 @@
               <label class="flex items-center gap-2">
                 <input id="f_kev" type="checkbox" class="h-4 w-4" /><span class="text-sm">KEV only</span>
               </label>
-              <div class="ml-auto flex gap-2">
+              <div class="filters-box__actions">
                 <button id="btnExportCsv" class="btn btn--ghost" type="button">Export CSV</button>
                 <button id="btnExportNdjson" class="btn btn--ghost" type="button">Export NDJSON</button>
                 <button id="f_clear" class="btn btn--ghost" type="button">Clear</button>
@@ -254,15 +285,15 @@
               <div id="filterPills" class="w-full flex flex-wrap gap-2 mt-2"></div>
             </div>
 
-            <div class="card">
-              <div class="flex items-center justify-between px-2">
+            <div class="card glass-panel">
+              <div class="results-header">
                 <div>
                   <div class="text-base font-semibold">
                     Results (<span id="resCount">0</span>)
                   </div>
                   <div class="text-xs text-slate-500" id="windowLabel">Window: —</div>
                 </div>
-                <div class="text-xs text-slate-500">Click headers to sort</div>
+                <div class="results-header__hint">Click headers to sort</div>
               </div>
               <div class="overflow-x-auto">
                 <table id="resTable" class="results-table">
@@ -283,7 +314,7 @@
               </div>
             </div>
 
-            <div class="card" id="detailPanel" hidden>
+            <div class="card glass-panel" id="detailPanel" hidden>
               <div class="flex items-center justify-between mb-2">
                 <div>
                   <div class="text-lg font-semibold" id="d_cve"></div>

@@ -268,21 +268,60 @@
       }
     }
 
+    function iconForAlert(level) {
+      switch (level) {
+        case 'success':
+          return '🛡️';
+        case 'warning':
+          return '⚠️';
+        case 'error':
+          return '⛔';
+        default:
+          return 'ℹ️';
+      }
+    }
+
+    function dismissAlert(box) {
+      if (!box) return;
+      box.classList.add('flash--leaving');
+      window.setTimeout(() => {
+        box.remove();
+      }, 280);
+    }
+
     function showAlert(message, level = 'info', timeout = 5000) {
       if (!dom.alerts) return;
       const box = document.createElement('div');
       box.className = `flash flash--${level}`;
-      box.textContent = message;
+
+      const icon = document.createElement('span');
+      icon.className = 'flash__icon';
+      icon.textContent = iconForAlert(level);
+
+      const text = document.createElement('div');
+      text.className = 'flash__message';
+      text.textContent = message;
+
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'flash__close';
+      close.setAttribute('aria-label', 'Dismiss alert');
+      close.innerHTML = '&times;';
+      close.addEventListener('click', () => dismissAlert(box));
+
+      box.appendChild(icon);
+      box.appendChild(text);
+      box.appendChild(close);
       dom.alerts.appendChild(box);
+
       if (timeout) {
-        setTimeout(() => {
-          box.remove();
-        }, timeout);
+        window.setTimeout(() => dismissAlert(box), timeout);
       }
     }
 
     function clearAlerts() {
-      dom.alerts.innerHTML = '';
+      if (!dom.alerts) return;
+      Array.from(dom.alerts.children).forEach((child) => dismissAlert(child));
     }
 
     function findWatchlist(id) {
@@ -297,7 +336,10 @@
 
     function renderSidebar() {
       if (!dom.projectsContainer) return;
-      dom.projectsContainer.innerHTML = '';
+      const container = dom.projectsContainer;
+      container.innerHTML = '';
+      const fragment = document.createDocumentFragment();
+
       state.projects
         .slice()
         .sort((a, b) => (a.order || 0) - (b.order || 0))
@@ -308,6 +350,7 @@
 
           const header = document.createElement('div');
           header.className = 'project-header';
+
           const collapseBtn = document.createElement('button');
           collapseBtn.type = 'button';
           collapseBtn.className = 'link';
@@ -329,46 +372,66 @@
           const count = document.createElement('span');
           const lists = sortedListsFor(project.id);
           const activeCount = lists.length;
-          const projectCpes = lists.flatMap((wl) => wl.cpes);
-          const projectMatches = state.filteredResults.filter((item) => (item.matchedCPE || []).some((cpe) => projectCpes.includes(cpe))).length;
+          const projectCpes = lists.flatMap((wl) => (Array.isArray(wl.cpes) ? wl.cpes : []));
+          const projectCpeSet = new Set(projectCpes);
+          const projectMatches = projectCpeSet.size
+            ? state.filteredResults.filter((item) =>
+                (item.matchedCPE || []).some((cpe) => projectCpeSet.has(cpe))
+              ).length
+            : 0;
           count.className = 'text-xs text-slate-500';
           count.textContent = `${activeCount} watch${activeCount === 1 ? '' : 'es'} • ${projectMatches} match${projectMatches === 1 ? '' : 'es'}`;
 
           const menuBtn = document.createElement('button');
           menuBtn.type = 'button';
           menuBtn.className = 'more-btn';
+          menuBtn.setAttribute('aria-haspopup', 'true');
+          menuBtn.setAttribute('aria-expanded', 'false');
           menuBtn.textContent = '⋯';
-          menuBtn.addEventListener('click', (evt) => {
-            evt.preventDefault();
-            evt.stopPropagation();
-            toggleProjectMenu(wrapper, project.id);
-          });
 
           header.appendChild(collapseBtn);
           header.appendChild(title);
           header.appendChild(count);
           header.appendChild(menuBtn);
-
           wrapper.appendChild(header);
 
           const menu = document.createElement('div');
           menu.className = 'menuPanel hidden';
-          menu.innerHTML = `
-            <button class="menuPanel__item" data-action="rename">Rename</button>
-            <button class="menuPanel__item" data-action="import">Import JSON</button>
-            <a class="menuPanel__item" data-action="export" href="/api/projects/${project.id}/export">Export JSON</a>
-            <button class="menuPanel__item menuPanel__item--danger" data-action="delete">Delete</button>
-          `;
-          menu.addEventListener('click', (evt) => {
-            const target = evt.target;
-            if (!(target instanceof HTMLElement)) return;
-            const action = target.dataset.action;
-            if (!action) return;
-            evt.preventDefault();
-            handleProjectAction(project.id, action);
-            menu.classList.add('hidden');
+
+          const makeButton = (label, action, extraClass) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `menuPanel__item${extraClass ? ` ${extraClass}` : ''}`;
+            btn.textContent = label;
+            btn.addEventListener('click', () => {
+              handleProjectAction(project.id, action);
+              menu.classList.add('hidden');
+              menuBtn.setAttribute('aria-expanded', 'false');
+            });
+            return btn;
+          };
+
+          menu.appendChild(makeButton('Rename', 'rename'));
+          menu.appendChild(makeButton('Import JSON', 'import'));
+
+          const exportLink = document.createElement('a');
+          exportLink.className = 'menuPanel__item';
+          exportLink.href = `/api/projects/${project.id}/export`;
+          exportLink.textContent = 'Export JSON';
+          exportLink.addEventListener('click', () => {
+            closeAllProjectMenus();
           });
+          menu.appendChild(exportLink);
+
+          menu.appendChild(makeButton('Delete', 'delete', 'menuPanel__item--danger'));
+
           wrapper.appendChild(menu);
+
+          menuBtn.addEventListener('click', (evt) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            toggleProjectMenu(wrapper, menuBtn);
+          });
 
           const listEl = document.createElement('ul');
           listEl.className = 'project-watchlists';
@@ -378,14 +441,20 @@
 
           lists.forEach((watch) => {
             const li = document.createElement('li');
-            li.className = `watchlist-entry ${state.currentWatchId === watch.id ? 'watchlist-entry--active' : ''}`;
+            li.classList.add('watchlist-entry');
+            if (state.currentWatchId === watch.id) {
+              li.classList.add('watchlist-entry--active');
+            }
             li.draggable = true;
             li.dataset.id = watch.id;
             li.dataset.projectId = project.id;
 
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
-            checkbox.className = `wlbox h-4 w-4 mt-0.5 ${state.manageMode ? '' : 'hidden'}`;
+            checkbox.className = 'wlbox h-4 w-4 mt-0.5';
+            if (!state.manageMode) {
+              checkbox.classList.add('hidden');
+            }
             checkbox.checked = state.selectedIds.has(watch.id);
             checkbox.addEventListener('change', () => {
               if (checkbox.checked) {
@@ -399,10 +468,17 @@
             const nameLink = document.createElement('a');
             nameLink.href = '#';
             nameLink.className = 'wlLink min-w-0';
-            nameLink.innerHTML = `
-              <div class="text-sm font-medium truncate">${watch.name}</div>
-              <div class="text-xs text-slate-500 truncate">${watch.cpes.length} CPE${watch.cpes.length === 1 ? '' : 's'}</div>
-            `;
+
+            const primary = document.createElement('div');
+            primary.className = 'text-sm font-medium truncate';
+            primary.textContent = watch.name || 'Untitled watch';
+
+            const secondary = document.createElement('div');
+            secondary.className = 'text-xs text-slate-500 truncate';
+            secondary.textContent = `${watch.cpes.length} CPE${watch.cpes.length === 1 ? '' : 's'}`;
+
+            nameLink.appendChild(primary);
+            nameLink.appendChild(secondary);
             nameLink.addEventListener('click', (evt) => {
               evt.preventDefault();
               if (state.manageMode) return;
@@ -411,18 +487,18 @@
 
             const quickContainer = document.createElement('div');
             quickContainer.className = 'entry-actions';
-            quickContainer.innerHTML = `
-              <button class="quick-btn" data-win="24h">24h</button>
-              <button class="quick-btn" data-win="90d">90d</button>
-              <button class="quick-btn" data-win="120d">120d</button>
-            `;
-            quickContainer.querySelectorAll('.quick-btn').forEach((btn) => {
+            ['24h', '90d', '120d'].forEach((win) => {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'quick-btn';
+              btn.dataset.win = win;
+              btn.textContent = win;
               btn.addEventListener('click', (evt) => {
                 evt.preventDefault();
                 evt.stopPropagation();
-                const win = btn.dataset.win || '24h';
                 selectWatchlist(watch.id, true, win);
               });
+              quickContainer.appendChild(btn);
             });
 
             li.appendChild(checkbox);
@@ -432,7 +508,7 @@
             li.addEventListener('dragstart', (evt) => {
               evt.dataTransfer.effectAllowed = 'move';
               evt.dataTransfer.setData('text/plain', watch.id);
-              setTimeout(() => {
+              window.setTimeout(() => {
                 li.classList.add('dragging');
               }, 0);
             });
@@ -459,32 +535,52 @@
             evt.preventDefault();
             const watchId = evt.dataTransfer.getData('text/plain');
             if (!watchId) return;
-            const ids = Array.from(listEl.querySelectorAll('li')).map((li) => li.dataset.id).filter(Boolean);
+            const ids = Array.from(listEl.querySelectorAll('li'))
+              .map((li) => li.dataset.id)
+              .filter(Boolean);
             moveWatchlist(watchId, project.id, ids);
           });
 
           wrapper.appendChild(listEl);
-          dom.projectsContainer.appendChild(wrapper);
+          fragment.appendChild(wrapper);
         });
+
+      container.appendChild(fragment);
     }
 
-    function toggleProjectMenu(wrapper, projectId) {
-      wrapper.querySelectorAll('.menuPanel').forEach((panel) => {
-        panel.classList.toggle('hidden');
+    function closeAllProjectMenus() {
+      document.querySelectorAll('.menuPanel').forEach((panel) => panel.classList.add('hidden'));
+      document.querySelectorAll('.more-btn[aria-expanded="true"]').forEach((btn) => {
+        btn.setAttribute('aria-expanded', 'false');
       });
+    }
+
+    function toggleProjectMenu(wrapper, trigger) {
+      const menu = wrapper.querySelector('.menuPanel');
+      if (!menu) return;
+      const willOpen = menu.classList.contains('hidden');
+      closeAllProjectMenus();
+      if (!willOpen) {
+        return;
+      }
+      menu.classList.remove('hidden');
+      if (trigger) {
+        trigger.setAttribute('aria-expanded', 'true');
+      }
       document.addEventListener(
         'click',
         function handler(evt) {
           if (!(evt.target instanceof Node)) return;
           if (!wrapper.contains(evt.target)) {
-            wrapper.querySelectorAll('.menuPanel').forEach((panel) => panel.classList.add('hidden'));
-            document.removeEventListener('click', handler);
+            menu.classList.add('hidden');
+            if (trigger) {
+              trigger.setAttribute('aria-expanded', 'false');
+            }
           }
         },
         { once: true }
       );
     }
-
     function getDragAfterElement(container, y) {
       const draggableElements = [...container.querySelectorAll('li:not(.dragging)')];
       return draggableElements.reduce(
@@ -1305,6 +1401,8 @@
             evt.preventDefault();
             bulkDelete();
           }
+        } else if (evt.key === 'Escape') {
+          closeAllProjectMenus();
         } else if (evt.key.toLowerCase() === 'a') {
           evt.preventDefault();
           toggleSelectMode(true);
