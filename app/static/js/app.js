@@ -87,6 +87,8 @@
       btnRun120: document.getElementById('btnRun120'),
       btnSaveOnly: document.getElementById('btnSaveOnly'),
       btnDeleteWatch: document.getElementById('btnDeleteWatch'),
+      runOverlay: document.getElementById('runOverlay'),
+      runOverlayLabel: document.getElementById('runOverlayLabel'),
       builderToggle: document.getElementById('builderToggle'),
       builderBody: document.getElementById('builderBody'),
       builderOutput: document.getElementById('b_output'),
@@ -810,6 +812,40 @@
       }
     }
 
+    function windowLabelFor(win) {
+      switch (win) {
+        case '24h':
+          return 'the last 24 hours';
+        case '90d':
+          return 'the last 90 days';
+        case '120d':
+          return 'the last 120 days';
+        default:
+          return 'the selected window';
+      }
+    }
+
+    function setRunPending(pending, windowLabel) {
+      state.pendingRun = pending;
+      const buttons = [dom.btnRun24, dom.btnRun90, dom.btnRun120];
+      buttons.forEach((btn) => {
+        if (btn) {
+          btn.disabled = pending;
+          btn.setAttribute('aria-busy', pending ? 'true' : 'false');
+        }
+      });
+      if (dom.runOverlay) {
+        if (pending) {
+          dom.runOverlay.classList.remove('hidden');
+          if (dom.runOverlayLabel) {
+            dom.runOverlayLabel.textContent = `Scanning ${windowLabel}…`;
+          }
+        } else {
+          dom.runOverlay.classList.add('hidden');
+        }
+      }
+    }
+
     async function runCurrent(window) {
       if (state.pendingRun) {
         return;
@@ -823,7 +859,7 @@
         showAlert('Save the watchlist before running.', 'error');
         return;
       }
-      state.pendingRun = true;
+      setRunPending(true, windowLabelFor(window));
       try {
         const result = await api.runWatchlist(id, window);
         state.originalResults = result.results || [];
@@ -838,7 +874,7 @@
       } catch (err) {
         console.error('Run failed', err);
       } finally {
-        state.pendingRun = false;
+        setRunPending(false);
       }
     }
 

@@ -449,6 +449,13 @@ textarea.field-input {
   box-shadow: var(--shadow-sm);
 }
 
+.cta:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .cta--dark {
   background: linear-gradient(135deg, #0f172a, #1e293b);
   color: #fff;
@@ -470,6 +477,46 @@ textarea.field-input {
   font-size: 0.7rem;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+.run-controls {
+  position: relative;
+}
+
+.run-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(6px) saturate(140%);
+  z-index: 5;
+  padding: 0 1rem;
+}
+
+.run-overlay__spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: run-spin 0.8s linear infinite;
+}
+
+.run-overlay__label {
+  font-size: 0.9rem;
+}
+
+@keyframes run-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .watchlist-entry {
