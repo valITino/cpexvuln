@@ -316,20 +316,32 @@ def create_app(args) -> Flask:
             # Ensure each issue is at least a dict
             if not isinstance(issue, dict):
                 issue = {"message": str(issue)}
+            message = issue.get("message") or "Unknown error"
+            details = issue.get("details")
+            hint = issue.get("hint")
+
             item = {
                 "cpe": issue.get("cpe"),
-                "message": issue.get("message") or "Unknown error",
+                "message": message,
                 "watchlistId": entry.get("id"),
                 "watchlistName": entry.get("name"),
                 "window": label,
             }
+            if details:
+                item["details"] = details
+            if hint:
+                item["hint"] = hint
             detailed_issues.append(item)
             logger.warning(
                 "Watchlist %s (%s) encountered an issue for %s: %s",
                 entry.get("id"),
                 entry.get("name"),
                 item.get("cpe"),
-                item.get("message"),
+                " | ".join(
+                    part
+                    for part in (message, details, hint)
+                    if isinstance(part, str) and part.strip()
+                ),
             )
         return results, label, detailed_issues
 

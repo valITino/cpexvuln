@@ -252,7 +252,15 @@
         parts.push(`CPE ${issue.cpe}`);
       }
       const prefix = parts.length ? `${parts.join(' ')}: ` : '';
-      return `${prefix}${issue.message || 'Unknown error'}`;
+      const detailParts = [];
+      const mainMessage = issue.message && String(issue.message).trim();
+      if (mainMessage) detailParts.push(mainMessage);
+      const extraDetails = issue.details && String(issue.details).trim();
+      if (extraDetails && extraDetails !== mainMessage) detailParts.push(extraDetails);
+      const hint = issue.hint && String(issue.hint).trim();
+      if (hint) detailParts.push(hint);
+      const body = detailParts.length ? detailParts.join(' — ') : 'Unknown error';
+      return `${prefix}${body}`;
     }
 
     function displayIssues(issues) {
