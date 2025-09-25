@@ -331,14 +331,24 @@ def fetch_for_cpe(
     params = {"resultsPerPage": MAX_CVE_PAGE_SIZE}
     params.update(extra_params or {})
 
+    # The NVD documentation specifies that the `isVulnerable` and
+    # `noRejected` parameters are boolean flags that should appear
+    # without values.  Including a value like ``true`` is tolerated by
+    # the API, but omitting the value more closely follows the
+    # examples provided in the official documentation【388027904031563†L350-L377】【388027904031563†L490-L499】.
     if is_vulnerable:
+        # When requesting vulnerable CPEs the parameter name changes
+        # from ``virtualMatchString`` to ``cpeName`` and the
+        # ``isVulnerable`` flag is included without a value.
         params["cpeName"] = cpe
-        params["isVulnerable"] = "true"
+        params["isVulnerable"] = ""
     else:
         params["virtualMatchString"] = cpe
 
     if no_rejected:
-        params["noRejected"] = "true"
+        # Exclude CVEs with a REJECT status by including the
+        # `noRejected` flag without a value.
+        params["noRejected"] = ""
 
     try:
         return _fetch_cve_window(
@@ -501,17 +511,50 @@ def extract_references(vuln: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def extract_affected_cpes(vuln: Dict[str, Any]) -> List[str]:
-    cfg = vuln.get("cve", {}).get("configurations") or {}
-    acc: List[str] = []
-    nodes = cfg.get("nodes") or []
-    for node in nodes:
-        matches = node.get("cpeMatch") or []
-        for match in matches:
-            for key in ("criteria", "cpeName"):
-                val = match.get(key)
-                if val and val not in acc:
-                    acc.append(val)
-    return acc
+    """Return a flat list of CPE strings affected by the CVE.
+
+    NVD 2.0 represents configurations in two shapes:
+      1) Legacy dict:   cve.configurations = { "nodes": [...] }
+      2) New list form: cve.configurations = [ { "nodes": [...] }, ... ]
+    Nodes may also be nested via "children". Each node can contain a list
+    of "cpeMatch" entries which carry either a "criteria" (CPE 2.3 URI)
+    and/or a "cpeName" (sometimes a list in older data).
+    """
+    configs = vuln.get("cve", {}).get("configurations") or []
+    if isinstance(configs, dict):
+        configs = [configs]
+
+    out: List[str] = []
+    seen: set[str] = set()
+
+    def _add(val: Any) -> None:
+        if isinstance(val, str) and val and val not in seen:
+            seen.add(val)
+            out.append(val)
+        elif isinstance(val, list):
+            for v in val:
+                if isinstance(v, str) and v and v not in seen:
+                    seen.add(v)
+                    out.append(v)
+
+    def _walk_node(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        for match in node.get("cpeMatch") or []:
+            if isinstance(match, dict):
+                _add(match.get("criteria"))
+                _add(match.get("cpeName"))  # can be str or list
+        # Recurse into children if present
+        for child in node.get("children") or []:
+            _walk_node(child)
+
+    for cfg in configs:
+        if not isinstance(cfg, dict):
+            continue
+        for node in cfg.get("nodes") or []:
+            _walk_node(node)
+
+    return out
 
 
 def is_kev(vuln: Dict[str, Any]) -> bool:

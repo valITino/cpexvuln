@@ -270,8 +270,12 @@ def create_app(args) -> Flask:
             value = options.get(key)
             if value:
                 query_params[key] = value
+        # When including boolean flags such as `hasKev` we only need to
+        # include the parameter name without a value.  The NVD
+        # documentation illustrates these flags as bare query
+        # parameters (e.g., `...?hasKev` instead of `...?hasKev=true`)【388027904031563†L350-L377】.
         if options.get("hasKev"):
-            query_params["hasKev"] = "true"
+            query_params["hasKev"] = ""
         logger.info(
             "Running watchlist %s (%s) for %s",
             entry.get("id"),

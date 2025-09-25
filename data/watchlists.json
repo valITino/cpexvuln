@@ -2,39 +2,13 @@
   "lists": [
     {
       "cpes": [
-        "cpe:2.3:o:cisco:ios:*:*:*:*:*:*:*"
+        "cpe:2.3:a:apache:http_server:2.0.9:*:*:*:*:*:*:*",
+        "cpe:2.3:a:Apache:http_server:*:*:*:*:*:*:*:*"
       ],
-      "id": "1cefbf3b-723f-4c95-8a29-aacd0efee6a3",
-      "name": "Cisco",
+      "id": "47d532c2b616458c8a81bd637723a321",
+      "name": "Apache",
       "options": {
-        "apiKey": null,
-        "caBundle": null,
-        "cveId": null,
-        "cvssV3Metrics": null,
-        "cvssV3Severity": null,
-        "cvssV4Metrics": null,
-        "cvssV4Severity": null,
-        "cweId": null,
-        "hasKev": false,
-        "httpProxy": null,
-        "httpsProxy": null,
-        "insecure": true,
-        "isVulnerable": false,
-        "minCvss": 0.0,
-        "noRejected": true,
-        "timeout": null
-      },
-      "order": 0,
-      "projectId": "1308cd59a1ac443485f9557b75621584"
-    },
-    {
-      "cpes": [
-        "cpe:2.3:a:microsoft:365_apps:-:*:*:*:enterprise:*:x64:*"
-      ],
-      "id": "f0f60575-e9a4-4a56-af6a-9ed132b897aa",
-      "name": "MS Apps",
-      "options": {
-        "apiKey": null,
+        "apiKey": "42351400-c41e-4a63-9f97-bd7b14af3e7",
         "caBundle": null,
         "cveId": null,
         "cvssV3Metrics": null,
@@ -48,11 +22,11 @@
         "insecure": false,
         "isVulnerable": false,
         "minCvss": 0.0,
-        "noRejected": true,
+        "noRejected": false,
         "timeout": null
       },
-      "order": 1,
-      "projectId": "1308cd59a1ac443485f9557b75621584"
+      "order": 0,
+      "projectId": "10236b51dd62446fab799712bdd12027"
     }
   ],
   "projects": [
@@ -60,6 +34,11 @@
       "id": "1308cd59a1ac443485f9557b75621584",
       "name": "Default",
       "order": 0
+    },
+    {
+      "id": "10236b51dd62446fab799712bdd12027",
+      "name": "Test",
+      "order": 1
     }
   ]
 }
