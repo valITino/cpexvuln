@@ -1,34 +1,40 @@
-# NVD CPE Watch
+# Vulnerability Management System
 
-A lightweight Flask application for tracking newly published CVEs that match the Common Platform Enumeration (CPE) strings you care about. It wraps the [NVD 2.0 CVE API](https://nvd.nist.gov/developers/vulnerabilities) with a stateful scheduler, a modern web experience for managing watchlists, and a command-line runner for automating exports.
+A lightweight Flask application for tracking newly published CVEs that match the Common Platform Enumeration (CPE) strings you care about. It integrates with the [Vulnerability-Lookup API](https://vulnerability.circl.lu) (successor to cve-search) with automated scheduling, scan comparison, EPSS scoring, and a modern web experience for managing watchlists.
 
 ## Table of contents
 - [Features](#features)
 - [Architecture overview](#architecture-overview)
 - [Quick start](#quick-start)
 - [Running the web UI](#running-the-web-ui)
+- [Running the scheduler](#running-the-scheduler)
 - [Running one-off scans](#running-one-off-scans)
 - [Data & persistence](#data--persistence)
-- [Understanding the NVD API usage](#understanding-the-nvd-api-usage)
+- [Understanding the Vulnerability-Lookup API](#understanding-the-vulnerability-lookup-api)
 - [Development workflow](#development-workflow)
 - [Project layout](#project-layout)
 
 ## Features
-- **Projects & watchlists** – organise watches into collapsible folders with drag-and-drop, keyboard shortcuts, import/export, and bulk deletion.
-- **Fast scanning windows** – query the NVD API for the last 24 hours, 90 days, or an extended 120 day sweep while respecting the 120-day API window cap.
-- **High-signal results** – merge duplicate CVEs, annotate KEV status, compute preferred CVSS v4/v3 metrics, list affected CPEs, CWEs, references, and surface filter pills that mirror active search criteria.
-- **Flexible exports** – export the current grid view as CSV or NDJSON, or run the CLI to emit normalised NDJSON snapshots for downstream automation.
-- **CPE tooling** – build strings with the interactive builder, fetch name suggestions from the NVD Products API, and validate isVulnerable requests when versions are wildcards.
-- **Operational niceties** – per-watchlist overrides for API keys, proxies, CA bundles, TLS skipping, and timeouts plus resilient retry/backoff logic.
+- **Automated scanning** – Schedule vulnerability scans at configured times (default: 07:30, 12:30, 16:00, 19:30) with the built-in scheduler
+- **Scan comparison** – Automatically detect "New" vulnerabilities by comparing consecutive scans and track scan history for up to 90 days
+- **EPSS scoring** – View Exploit Prediction Scoring System (EPSS) scores alongside CVSS to prioritize based on exploitation probability
+- **Advanced filtering** – Filter by severity, CVSS score, EPSS score, KEV status, and "New" vulnerabilities with real-time updates
+- **Watchlist management** – Create and organize CPE watchlists with fast 24h and 90d scanning windows
+- **High-signal results** – Merge duplicate CVEs, annotate KEV status (CISA Known Exploited Vulnerabilities), compute preferred CVSS v4/v3 metrics
+- **Flexible exports** – Export results as CSV or NDJSON for downstream automation
+- **CPE tooling** – Interactive CPE 2.3 builder with field validation
+- **Operational niceties** – Per-watchlist overrides for proxies, CA bundles, TLS verification, and resilient retry/backoff logic
 
 ## Architecture overview
-- **Flask web app** – `app/web.py` wires endpoints for watchlist CRUD, scan orchestration, and export helpers while rendering a responsive Tailwind-powered interface located in `app/templates` and `app/static`.
-- **Scanner core** – `app/scan.py` coordinates date windows, deduplicates CVEs, enriches metadata, and persists per-watchlist cursors.
-- **NVD integration** – `app/nvd.py` configures a retry-friendly `requests` session, slices queries into 120-day windows (NVD limit), and automatically falls back to strict lookups when wildcard queries fail.
-- **Configuration & state** – `app/config.py` defines on-disk paths (under `./data`) and key timing constants. JSON helpers in `app/utils.py` ensure atomic writes and robust ISO timestamp parsing even if the feed format drifts.
+- **Flask web app** – `app/web.py` provides watchlist CRUD, scan orchestration, and export functionality with a responsive Tailwind UI
+- **Scanner core** – `app/scan.py` coordinates scans, deduplicates CVEs, enriches metadata (CVSS, EPSS, KEV), and persists state
+- **Vulnerability-Lookup integration** – `app/vulnerabilitylookup.py` implements retry-friendly HTTP client for the Vulnerability-Lookup API with date-based filtering
+- **Scan history** – `app/scan_history.py` tracks historical scans for comparison and "New" vulnerability detection
+- **Scheduler** – `app/scheduler.py` provides automated scanning at configured times with continuous or one-off execution modes
+- **Configuration & state** – `app/config.py` defines paths (under `./data`) and timing constants. `app/utils.py` ensures atomic writes and robust ISO timestamp parsing
 
 ## Quick start
-1. **Prerequisites** – Python 3.10+ and a network route to the NVD APIs. Request an [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) for higher rate limits (optional but recommended).
+1. **Prerequisites** – Python 3.10+ and network access to vulnerability.circl.lu
 2. **Clone & install**
    ```bash
    git clone https://github.com/your-org/cpexvuln.git
@@ -37,87 +43,305 @@ A lightweight Flask application for tracking newly published CVEs that match the
    source .venv/bin/activate  # or .venv\Scripts\activate on Windows
    pip install -r requirements.txt
    ```
-3. **Seed data directories** – the first run creates `./data`, `./data/watchlists.json`, and `./data/state.json`. You can pre-populate watchlists by editing the JSON file if desired.
-4. **Environment** – export `NVD_API_KEY` if you have one and set `HTTPS_PROXY`, `HTTP_PROXY`, or `REQUESTS_CA_BUNDLE` to mirror your network. The CLI accepts the same values via flags (`--https-proxy`, `--http-proxy`, `--ca-bundle`, `--timeout`, `--insecure`).
+3. **Seed data directories** – the first run creates `./data`, `./data/watchlists.json`, `./data/state.json`, and `./data/scan_history.json`
+4. **Environment** – Set optional environment variables:
+   - `HTTPS_PROXY`, `HTTP_PROXY` – for proxy configuration
+   - `REQUESTS_CA_BUNDLE` – custom CA certificate bundle
+   - `SCAN_SCHEDULE` – comma-separated scan times in HH:MM format (default: "07:30,12:30,16:00,19:30")
+   - `SCAN_HISTORY_RETENTION_DAYS` – how long to keep scan history (default: 90)
 
 ## Running the web UI
 Start the interactive dashboard (binds to `127.0.0.1:5000` by default):
 
 ```bash
-python main.py web --insecure  # omit --insecure in production
+python main.py web
 ```
 
-Key UI capabilities include:
+**With integrated scheduler:**
 
-- creating or editing watchlists inside projects (folders) with drag-and-drop reordering and keyboard shortcuts (`N`, `P`, `A`, `Del`)
-- using the CPE 2.3 builder with live suggestions from the Products API and piping finished strings into the watch form
-- triggering 24 h, 90 d, or 120 d scans, reviewing per-project match counts, and re-running watches directly from the sidebar quick actions
-- filtering results with search/severity/min-score/KEV toggles, removing filters via pills, and exporting the current grid as CSV or NDJSON
+```bash
+python main.py web --with-scheduler
+```
 
-Results are cached on disk so repeated scans are incremental rather than exhaustive.
+Key UI capabilities:
 
-To deploy behind a reverse proxy, override the bind host/port:
+- Create and manage watchlists with one or more CPE strings
+- Use the CPE 2.3 builder with field validation
+- Trigger 24h or 90d scans and review results immediately
+- Filter by:
+  - **Text search** – CVE ID, description, or CPE
+  - **Severity** – Critical, High, Medium, Low, None
+  - **Min CVSS** – numeric threshold (0-10)
+  - **Min EPSS %** – exploitation probability threshold (0-100%)
+  - **Status** – Show only "New" vulnerabilities from latest scan
+  - **KEV only** – CISA Known Exploited Vulnerabilities
+- Sort results by CVE, Severity, CVSS, EPSS, Published, or Last Modified
+- View detailed CVE information including EPSS scores and percentiles
+- Export filtered results as CSV or NDJSON
+
+To deploy behind a reverse proxy:
 
 ```bash
 python main.py web --host 0.0.0.0 --port 8080
 ```
 
+## Running the scheduler
+
+The scheduler automatically runs scans for all configured watchlists at the specified times.
+
+**Continuous mode** (runs until stopped):
+
+```bash
+python main.py scheduler
+```
+
+This will:
+- Start the scheduler with configured scan times (default: 07:30, 12:30, 16:00, 19:30)
+- Run scans for all watchlists at each scheduled time
+- Store scan results in scan history for comparison
+- Log all activity to stdout
+- Continue running until Ctrl+C
+
+**One-time mode** (run all watchlists once and exit):
+
+```bash
+python main.py scheduler --once
+```
+
+**Configure scan times** via environment variable:
+
+```bash
+export SCAN_SCHEDULE="06:00,12:00,18:00"
+python main.py scheduler
+```
+
+**Recommended deployment:**
+
+Use systemd (Linux) or supervisor to run the scheduler as a background service:
+
+```ini
+# /etc/systemd/system/vuln-scanner.service
+[Unit]
+Description=Vulnerability Scanner Scheduler
+After=network.target
+
+[Service]
+Type=simple
+User=vulnscan
+WorkingDirectory=/opt/cpexvuln
+Environment="SCAN_SCHEDULE=07:30,12:30,16:00,19:30"
+ExecStart=/opt/cpexvuln/.venv/bin/python main.py scheduler
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ## Running one-off scans
-Use the CLI to pull CVEs for a list of CPEs and write NDJSON snapshots that can feed other tooling:
+Use the CLI to pull CVEs for a list of CPEs:
 
 ```bash
 python main.py run --cpes-file ./cpes/sample.txt --win 24h --out-dir ./exports
 ```
 
-- `--win 24h` scans the past day; `--win 90d` performs a deeper historical crawl and updates the `last_long_rescan` marker for the watchlist hash.
-- Optional connection flags mirror the web server: `--nvd-api-key`, `--https-proxy`, `--http-proxy`, `--ca-bundle`, `--timeout`, and `--insecure`.
-- `--win 24h` scans the past day; `--win 90d` or `--win 120d` perform deeper historical crawls and update the `last_long_rescan` marker.
-- Input files accept one CPE per line or comma-separated entries. Comments beginning with `#` are ignored.
-- Results are written as newline-delimited JSON with the file name `nvd_<timestamp>.jsonl`. Each entry mirrors the schema returned by the web UI, including KEV flags, severity, references, and the CPE that matched.
+- `--win 24h` scans the past day; `--win 90d` performs a deeper historical crawl
+- Optional connection flags: `--https-proxy`, `--http-proxy`, `--ca-bundle`, `--timeout`, `--insecure`
+- Input files accept one CPE per line or comma-separated entries. Comments beginning with `#` are ignored
+- Results are written as newline-delimited JSON (NDJSON) including CVSS, EPSS, KEV flags, severity, references, and matched CPE
 
 ## Data & persistence
-- **Projects & watchlists** live in `data/watchlists.json`. The file contains a `projects` array (folders) and a `lists` array (watchlists). Each list entry stores a UUID, project ID, ordered CPE strings, and an `options` object (e.g., `noRejected`, `isVulnerable`, `minCvss`, API key, proxies, timeout).
-- **Scan state** resides in `data/state.json`. Keys are derived from the SHA-256 hash of the sorted CPE set, enabling deduplication of overlapping watchlists. The state tracks the last run per CPE and the timestamp of the most recent 90-day backfill.
-- **Exports** created through the CLI go into `data/out/` by default but you can point `--out-dir` elsewhere.
 
-Both JSON files are written atomically with a `.tmp` swap to avoid corruption if the process stops mid-write.
+### File structure
+```
+data/
+├── watchlists.json      # Watchlist definitions
+├── state.json           # Scan state and cursors
+├── scan_history.json    # Historical scan results for comparison
+└── out/                 # Export directory
+```
 
-## Understanding the NVD API usage
-The scanner follows the official NVD CVE 2.0 feed contract:
+### watchlists.json
+Contains a `lists` array with watchlist entries:
+```json
+{
+  "lists": [
+    {
+      "id": "uuid",
+      "name": "My Watchlist",
+      "cpes": ["cpe:2.3:a:vendor:product:*:*:*:*:*:*:*:*"],
+      "insecure": false
+    }
+  ]
+}
+```
 
-- Queries use `virtualMatchString=<CPE>` to support wildcard matching. If NVD rejects the combination and the CPE includes a precise version, the code retries with `cpeName=<CPE>` for strict matching.
-- Requests are chunked into 120-day slices (`MAX_RANGE_DAYS`) and paginated until `totalResults` are exhausted. Retries are configured for HTTP 429/5xx responses with exponential backoff.
-- Responses are normalized to surface CVSS v4/v3 metrics when available, severity labels, CISA KEV indicators, CWE identifiers, and reference links.
-- The watchlist options map to supported parameters (`noRejected`, `hasKev`, `cveId`, `cweId`, `cvssV3Severity`, `cvssV4Severity`, etc.). Per-watchlist `isVulnerable=true` automatically switches to `cpeName` queries because `virtualMatchString` is not accepted by the API in that mode.
-- CPE suggestions in the builder query the [NVD Products API](https://nvd.nist.gov/developers/products) using `cpeMatchString` plus `keywordSearch`, retrieving up to 10 000 results per page and deduplicating by `cpeName`.
+### state.json
+Tracks scan state using SHA-256 hash of CPE set:
+```json
+{
+  "nvd:abc123": {
+    "version": 3,
+    "last_long_rescan": "2025-12-01T12:30:00.000Z",
+    "per_cpe": {
+      "cpe:2.3:...": "2025-12-01T12:30:00.000Z"
+    }
+  }
+}
+```
 
-Consult the [NVD API documentation](https://nvd.nist.gov/vuln/data-feeds) for query semantics, authentication, and service limits.
+### scan_history.json
+Stores historical scan results for comparison:
+```json
+{
+  "scans": [
+    {
+      "id": "uuid",
+      "timestamp": "2025-12-01T07:30:00.000Z",
+      "watchlist_id": "uuid",
+      "watchlist_name": "My Watchlist",
+      "cpes": ["cpe:2.3:..."],
+      "window": "24h",
+      "cve_ids": ["CVE-2024-1234", "CVE-2024-5678"],
+      "summary": {
+        "total": 150,
+        "critical": 12,
+        "high": 45,
+        "medium": 60,
+        "low": 33,
+        "kev_count": 8,
+        "epss_high_count": 25
+      },
+      "total_count": 150
+    }
+  ]
+}
+```
+
+Scans older than `SCAN_HISTORY_RETENTION_DAYS` (default: 90) are automatically removed.
+
+All JSON files are written atomically with a `.tmp` swap to avoid corruption.
+
+## Understanding the Vulnerability-Lookup API
+
+The application uses the [Vulnerability-Lookup API](https://vulnerability.circl.lu) which aggregates vulnerability data from multiple sources:
+
+### Key endpoints used
+- `/api/cvefor/<cpe>` – Retrieve all CVEs matching a CPE string
+
+### Data enrichment
+The API provides:
+- **CVSS metrics** – v4.0, v3.1, v3.0, v2.0 (prioritized in that order)
+- **EPSS scores** – Exploit Prediction Scoring System with probability (0-1) and percentile ranking
+- **KEV data** – CISA Known Exploited Vulnerabilities with dateAdded, dueDate, requiredAction
+- **CWE identifiers** – Common Weakness Enumeration
+- **Reference links** – with tags (Patch, Vendor Advisory, etc.)
+
+### Client-side filtering
+Since the Vulnerability-Lookup API returns all CVEs for a CPE, the application performs client-side date filtering based on the `last-modified` field to implement 24h and 90d windows.
+
+### No authentication required
+The public API endpoints do not require authentication.
+
+For more information, visit [vulnerability.circl.lu](https://vulnerability.circl.lu)
 
 ## Development workflow
-1. Install dev dependencies (they’re lightweight and included in `requirements.txt`).
-2. Format and lint before sending changes:
-   ```bash
-   pytest
-   flake8
-   bandit -r .
-   ```
-3. The front-end assets live in `app/static` (Tailwind CSS + vanilla JS). Any new UI logic should remain framework-free for easy auditing and should keep accessibility in mind.
-4. Use `python main.py web` while developing to exercise the Jinja template and client-side behaviour.
+
+### Testing
+Run the test suite:
+```bash
+pytest
+```
+
+### Code structure
+- `app/vulnerabilitylookup.py` – API client for Vulnerability-Lookup
+- `app/scan.py` – Core scanning and enrichment logic
+- `app/scan_history.py` – Scan tracking and comparison
+- `app/scheduler.py` – Automated scan scheduling
+- `app/web.py` – Flask routes and UI template
+- `app/config.py` – Configuration constants
+- `app/utils.py` – Utility functions (JSON I/O, time helpers, CPE parsing)
+
+### Adding features
+1. Add business logic to appropriate module
+2. Update `web.py` routes if UI changes needed
+3. Add tests in `tests/`
+4. Update this README
 
 ## Project layout
 ```
+cpexvuln/
 ├── app/
-│   ├── web.py          # Flask routes & UI helpers
-│   ├── scan.py         # Core scanning + result shaping
-│   ├── nvd.py          # API client and response parsing
-│   ├── utils.py        # JSON persistence, CPE utilities, time helpers
-│   ├── config.py       # Paths, timing constants, defaults
-│   ├── templates/      # Jinja HTML templates
-│   └── static/         # CSS & JavaScript for the web UI
-├── data/               # Watchlist & state JSON (created on first run)
-├── cpes/               # Sample CPE lists and helpers
-├── main.py             # Entry point for web or batch runs
-└── requirements.txt    # Runtime dependencies
+│   ├── config.py              # Configuration
+│   ├── vulnerabilitylookup.py # API client
+│   ├── scan.py                # Scan orchestration
+│   ├── scan_history.py        # Scan tracking
+│   ├── scheduler.py           # Automated scanning
+│   ├── state.py               # Window planning
+│   ├── utils.py               # Utilities
+│   └── web.py                 # Flask app
+├── data/                      # Runtime data (created on first run)
+│   ├── watchlists.json
+│   ├── state.json
+│   ├── scan_history.json
+│   └── out/
+├── tests/
+│   ├── test_vulnerabilitylookup.py
+│   ├── test_scan.py
+│   └── test_utils.py
+├── main.py                    # Entry point
+├── requirements.txt
+└── README.md
 ```
 
-Happy shipping, and keep an eye on that KEV feed!
+## Features in detail
+
+### EPSS Integration
+EPSS (Exploit Prediction Scoring System) predicts the probability that a vulnerability will be exploited in the wild within the next 30 days:
+- **Score**: 0-100% exploitation probability
+- **Percentile**: Ranking compared to all CVEs
+- **Display**: Red highlight for EPSS ≥ 50%
+- **Filtering**: Set minimum EPSS threshold (e.g., show only CVEs with >50% exploitation probability)
+
+### Scan Comparison
+Automatically compares consecutive scans to identify new vulnerabilities:
+- Each scan is stored with timestamp and CVE list
+- "New" filter shows only CVEs that weren't in the previous scan
+- Useful for daily monitoring workflows (e.g., "What changed in the 12:30 scan vs 07:30?")
+- Green "NEW" badge displayed on newly detected vulnerabilities
+
+### Scheduled Scanning
+The scheduler runs automatically at configured times:
+- Default times: 07:30, 12:30, 16:00, 19:30 (UTC)
+- Scans all watchlists using 24h window
+- Stores results in scan history
+- Handles errors gracefully (logs and continues)
+- Can run standalone or alongside web UI
+
+### Advanced Filtering
+Combine multiple filters for precise results:
+- **Text search**: CVE ID, description, matched CPE
+- **Severity**: Critical/High/Medium/Low/None
+- **CVSS**: Minimum base score (0-10)
+- **EPSS**: Minimum exploitation probability (0-100%)
+- **Status**: Show only new vulnerabilities from latest scan
+- **KEV**: Show only CISA Known Exploited Vulnerabilities
+
+All filters work together (AND logic) and update the table in real-time.
+
+## Migration from NVD API
+This application has been migrated from the NVD 2.0 API to Vulnerability-Lookup:
+- **More data sources**: Vulnerability-Lookup aggregates from NVD, CISA, and other sources
+- **EPSS included**: Exploitation prediction built-in
+- **No API key needed**: Public access without authentication
+- **Same CPE format**: CPE 2.3 strings work identically
+- **Client-side filtering**: Date filtering handled by the application
+
+## License
+[Include your license information here]
+
+## Contributing
+[Include contribution guidelines here]
+
+## Support
+For issues or questions, please file an issue on GitHub.

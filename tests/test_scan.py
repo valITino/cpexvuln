@@ -43,55 +43,60 @@ def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
 
     def fake_fetch(session, cpe, since, until, **kwargs):
         assert cpe == sample_cpe
+        # Vulnerability-Lookup format
         return [
             {
-                "cve": {
-                    "id": "CVE-1",
-                    "published": "2024-01-01T00:00:00.000Z",
-                    "lastModified": "2024-01-05T00:00:00.000Z",
-                    "sourceIdentifier": "src",
-                    "metrics": {
-                        "cvssMetricV31": [
-                            {
-                                "cvssData": {
-                                    "version": "3.1",
-                                    "baseScore": 8.1,
-                                    "vectorString": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-                                },
-                                "baseSeverity": "High",
-                            }
-                        ]
-                    },
-                    "descriptions": [{"lang": "en", "value": "Example vuln"}],
-                    "weaknesses": [{"description": [{"value": "CWE-79"}]}],
-                    "references": [{"url": "https://example", "source": "NVD", "tags": ["Patch"]}],
-                    "vulnStatus": "Analyzed",
-                    "cisaExploitAdd": "2024-01-06",
+                "id": "CVE-1",
+                "Published": "2024-01-01T00:00:00.000Z",
+                "last-modified": "2024-01-05T00:00:00.000Z",
+                "assigner": "src",
+                "cvss-metrics": [
+                    {
+                        "cvssV3_1": {
+                            "version": "3.1",
+                            "baseScore": 8.1,
+                            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                            "baseSeverity": "High",
+                        }
+                    }
+                ],
+                "summary": "Example vuln",
+                "cwe": ["79"],
+                "references": [{"url": "https://example", "source": "NVD", "tags": ["Patch"]}],
+                "state": "Analyzed",
+                "kev": {
+                    "dateAdded": "2024-01-06"
+                },
+                "epss": {
+                    "epss": 0.45,
+                    "percentile": 0.89
                 }
             },
             {
-                "cve": {
-                    "id": "CVE-1",
-                    "published": "2024-01-01T00:00:00.000Z",
-                    "lastModified": "2024-01-07T00:00:00.000Z",
-                    "sourceIdentifier": "src",
-                    "metrics": {
-                        "cvssMetricV31": [
-                            {
-                                "cvssData": {
-                                    "version": "3.1",
-                                    "baseScore": 9.0,
-                                    "vectorString": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-                                },
-                                "baseSeverity": "Critical",
-                            }
-                        ]
-                    },
-                    "descriptions": [{"lang": "en", "value": "Example vuln updated"}],
-                    "weaknesses": [{"description": [{"value": "CWE-89"}]}],
-                    "references": [{"url": "https://example2", "source": "Vendor", "tags": ["Vendor Advisory"]}],
-                    "vulnStatus": "Analyzed",
-                    "cisaExploitAdd": "2024-01-08",
+                "id": "CVE-1",
+                "Published": "2024-01-01T00:00:00.000Z",
+                "last-modified": "2024-01-07T00:00:00.000Z",
+                "assigner": "src",
+                "cvss-metrics": [
+                    {
+                        "cvssV3_1": {
+                            "version": "3.1",
+                            "baseScore": 9.0,
+                            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                            "baseSeverity": "Critical",
+                        }
+                    }
+                ],
+                "summary": "Example vuln updated",
+                "cwe": ["89"],
+                "references": [{"url": "https://example2", "source": "Vendor", "tags": ["Vendor Advisory"]}],
+                "state": "Analyzed",
+                "kev": {
+                    "dateAdded": "2024-01-08"
+                },
+                "epss": {
+                    "epss": 0.75,
+                    "percentile": 0.95
                 }
             },
         ]

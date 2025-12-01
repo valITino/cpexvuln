@@ -9,13 +9,14 @@ from flask import Flask, render_template_string, request, redirect, url_for, fla
 
 from .config import WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS, LONG_BACKFILL_DAYS
 from .utils import load_json, save_json, now_utc, hash_for_cpes
-from .nvd import build_session
+from .vulnerabilitylookup import build_session
 from .scan import run_scan
+from .scan_history import add_scan_result, get_new_vulnerabilities
 
 TEMPLATE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVD CPE Watch</title>
+<title>Vulnerability Management System</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   .badge { display:inline-flex; align-items:center; padding:0 0.5rem; border-radius:9999px; font-size:0.75rem; line-height:1.25rem; font-weight:600; }
@@ -37,7 +38,7 @@ TEMPLATE = """<!doctype html>
           <svg viewBox="0 0 24 24" class="h-5 w-5 text-indigo-600" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 7h16M4 12h16M4 17h10"/>
           </svg>
-          <span class="font-semibold">CPE Watch</span>
+          <span class="font-semibold">Vuln Manager</span>
         </div>
         <a href="#create" class="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-500">New</a>
       </div>
@@ -187,8 +188,19 @@ TEMPLATE = """<!doctype html>
                 </select>
               </div>
               <div>
-                <label class="text-xs text-slate-500">Min score</label>
+                <label class="text-xs text-slate-500">Min CVSS</label>
                 <input id="f_score" type="number" min="0" max="10" step="0.1" class="border rounded px-2 py-1 w-24" placeholder="e.g. 7.0">
+              </div>
+              <div>
+                <label class="text-xs text-slate-500">Min EPSS %</label>
+                <input id="f_epss" type="number" min="0" max="100" step="1" class="border rounded px-2 py-1 w-24" placeholder="e.g. 50">
+              </div>
+              <div>
+                <label class="text-xs text-slate-500">Status</label>
+                <select id="f_status" class="border rounded px-2 py-1">
+                  <option value="">All</option>
+                  <option value="new">New only</option>
+                </select>
               </div>
               <label class="flex items-center gap-2">
                 <input id="f_kev" type="checkbox" class="h-4 w-4"><span class="text-sm">KEV only</span>
@@ -271,7 +283,8 @@ TEMPLATE = """<!doctype html>
                     <th class="px-4 py-2 sortable" data-k="cve">CVE</th>
                     <th class="px-4 py-2">KEV</th>
                     <th class="px-4 py-2 sortable" data-k="sev">Severity</th>
-                    <th class="px-4 py-2 sortable" data-k="score">Score</th>
+                    <th class="px-4 py-2 sortable" data-k="score">CVSS</th>
+                    <th class="px-4 py-2 sortable" data-k="epss">EPSS %</th>
                     <th class="px-4 py-2 sortable" data-k="pub">Published</th>
                     <th class="px-4 py-2 sortable" data-k="mod">Last Modified</th>
                     <th class="px-4 py-2">Matched CPE</th>
@@ -395,14 +408,17 @@ TEMPLATE = """<!doctype html>
     list.forEach((r, idx)=>{
       const sev = r.severity || 'None';
       const score = (r.score ?? '');
+      const epss = r.epss !== null && r.epss !== undefined ? (r.epss * 100).toFixed(1) + '%' : '—';
+      const epssClass = r.epss >= 0.5 ? 'text-red-600 font-semibold' : '';
       const tr = document.createElement('tr');
       tr.className = 'border-t hover:bg-slate-50 cursor-pointer';
       tr.dataset.idx = idx;
       tr.innerHTML = `
-        <td class="px-4 py-2 text-indigo-700 underline">${r.cve}</td>
+        <td class="px-4 py-2 text-indigo-700 underline">${r.cve}${r.is_new ? ' <span class="text-xs bg-green-500 text-white px-1 rounded">NEW</span>' : ''}</td>
         <td class="px-4 py-2">${r.kev ? '✅' : '—'}</td>
         <td class="px-4 py-2"><span class="badge sev-${sev}">${sev}</span></td>
         <td class="px-4 py-2">${score}</td>
+        <td class="px-4 py-2 ${epssClass}">${epss}</td>
         <td class="px-4 py-2">${r.published || ''}</td>
         <td class="px-4 py-2">${r.lastModified || ''}</td>
         <td class="px-4 py-2 truncate max-w-[14rem]" title="${r.matched_cpe_query || ''}">${r.matched_cpe_query || ''}</td>`;
@@ -422,8 +438,10 @@ TEMPLATE = """<!doctype html>
     panel.hidden = false;
     const sev = r.severity || 'None';
     const score = (r.score ?? '');
-    document.getElementById('d_cve').textContent = r.cve + (r.kev ? '  (KEV)' : '');
-    document.getElementById('d_meta').textContent = `Severity: ${sev}  •  Score: ${score}  •  Modified: ${r.lastModified || ''}`;
+    const epss = r.epss !== null && r.epss !== undefined ? (r.epss * 100).toFixed(1) + '%' : 'N/A';
+    const epssPerc = r.epss_percentile !== null && r.epss_percentile !== undefined ? (r.epss_percentile * 100).toFixed(1) + 'th' : 'N/A';
+    document.getElementById('d_cve').textContent = r.cve + (r.kev ? '  (KEV)' : '') + (r.is_new ? '  (NEW)' : '');
+    document.getElementById('d_meta').textContent = `Severity: ${sev}  •  CVSS: ${score}  •  EPSS: ${epss} (${epssPerc} percentile)  •  Modified: ${r.lastModified || ''}`;
     document.getElementById('d_desc').textContent = r.description || '(no description)';
     document.getElementById('d_link').href = 'https://nvd.nist.gov/vuln/detail/' + r.cve;
 
@@ -448,8 +466,11 @@ TEMPLATE = """<!doctype html>
     const q = (document.getElementById('f_text').value || '').toLowerCase();
     const sev = document.getElementById('f_sev').value;
     const minScoreStr = document.getElementById('f_score').value;
+    const minEpssStr = document.getElementById('f_epss').value;
+    const statusFilter = document.getElementById('f_status').value;
     const kevOnly = document.getElementById('f_kev').checked;
     const minScore = minScoreStr ? parseFloat(minScoreStr) : NaN;
+    const minEpss = minEpssStr ? parseFloat(minEpssStr) / 100 : NaN;
 
     filtered = ORIGINAL.filter(r => {
       const hay = (r.cve + ' ' + (r.description || '') + ' ' + (r.matched_cpe_query || '')).toLowerCase();
@@ -458,6 +479,9 @@ TEMPLATE = """<!doctype html>
       if (sev && rsev !== sev) return false;
       const sc = (r.score === null || r.score === undefined) ? NaN : parseFloat(r.score);
       if (!isNaN(minScore) && (isNaN(sc) || sc < minScore)) return false;
+      const epss = (r.epss === null || r.epss === undefined) ? NaN : parseFloat(r.epss);
+      if (!isNaN(minEpss) && (isNaN(epss) || epss < minEpss)) return false;
+      if (statusFilter === 'new' && !r.is_new) return false;
       if (kevOnly && !r.kev) return false;
       return true;
     });
@@ -469,8 +493,8 @@ TEMPLATE = """<!doctype html>
     const dir = sortDir;
     const key = sortKey;
     filtered.sort((a,b)=>{
-      const A = (k)=>({cve:a.cve, sev:(a.severity||'None'), score:(a.score??-1), pub:(a.published||''), mod:(a.lastModified||'')})[k];
-      const B = (k)=>({cve:b.cve, sev:(b.severity||'None'), score:(b.score??-1), pub:(b.published||''), mod:(b.lastModified||'')})[k];
+      const A = (k)=>({cve:a.cve, sev:(a.severity||'None'), score:(a.score??-1), epss:(a.epss??-1), pub:(a.published||''), mod:(a.lastModified||'')})[k];
+      const B = (k)=>({cve:b.cve, sev:(b.severity||'None'), score:(b.score??-1), epss:(b.epss??-1), pub:(b.published||''), mod:(b.lastModified||'')})[k];
       const va=A(key), vb=B(key);
       if (va<vb) return -1*dir;
       if (va>vb) return  1*dir;
@@ -484,22 +508,26 @@ TEMPLATE = """<!doctype html>
     const txt = document.getElementById('f_text');
     const sev = document.getElementById('f_sev');
     const sc  = document.getElementById('f_score');
+    const epss = document.getElementById('f_epss');
+    const status = document.getElementById('f_status');
     const kev = document.getElementById('f_kev');
     const clr = document.getElementById('f_clear');
 
     if (txt) txt.addEventListener('input', applyFilters);
     if (sev) sev.addEventListener('change', applyFilters);
     if (sc)  sc.addEventListener('input', applyFilters);
+    if (epss) epss.addEventListener('input', applyFilters);
+    if (status) status.addEventListener('change', applyFilters);
     if (kev) kev.addEventListener('change', applyFilters);
     if (clr) clr.addEventListener('click', (e)=>{e.preventDefault();
-      if (txt) txt.value=''; if (sev) sev.value=''; if (sc) sc.value=''; if (kev) kev.checked=false; applyFilters();
+      if (txt) txt.value=''; if (sev) sev.value=''; if (sc) sc.value=''; if (epss) epss.value=''; if (status) status.value=''; if (kev) kev.checked=false; applyFilters();
     });
 
     document.querySelectorAll('th.sortable').forEach(th=>{
       th.addEventListener('click', ()=>{
         const k = th.dataset.k;
         if (sortKey === k) { sortDir = -sortDir; }
-        else { sortKey = k; sortDir = (k==='score' || k==='mod' || k==='pub') ? -1 : 1; }
+        else { sortKey = k; sortDir = (k==='score' || k==='epss' || k==='mod' || k==='pub') ? -1 : 1; }
         sortAndRender();
       });
     });
@@ -603,6 +631,25 @@ def create_app(args):
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
             save_json(STATE_FILE, state_all)
+
+        # Mark new vulnerabilities by comparing with previous scan
+        new_cve_ids = set()
+        if wl_id := current.get("id"):
+            new_vulns = get_new_vulnerabilities(results, wl_id)
+            new_cve_ids = {v["cve"] for v in new_vulns}
+
+            # Add to scan history
+            add_scan_result(
+                watchlist_id=wl_id,
+                watchlist_name=current.get("name", "Unnamed"),
+                cpes=current["cpes"],
+                cve_records=results,
+                scan_window=win
+            )
+
+        # Mark each result as new or not
+        for result in results:
+            result["is_new"] = result["cve"] in new_cve_ids
 
         window_label = "last 24 hours" if win == "24h" else "last 90 days"
         return render_template_string(
