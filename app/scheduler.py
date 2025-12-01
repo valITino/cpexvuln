@@ -130,9 +130,7 @@ class ScanScheduler:
                         state_key=state_key,
                         session=session,
                         insecure=insecure,
-                        api_key=None,  # Vulnerability-Lookup doesn't require API key
                         since=since,
-                        no_rejected=True,
                         kev_only=False,
                     )
 

@@ -28,7 +28,6 @@ def test_run_scan_logs_warning_on_error(monkeypatch, sample_cpe, capsys):
         state_key="nvd:test",
         session=object(),
         insecure=False,
-        api_key=None,
         since=datetime.now(timezone.utc) - timedelta(days=1),
     )
 
@@ -111,7 +110,6 @@ def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
         state_key="nvd:test",
         session=object(),
         insecure=False,
-        api_key=None,
         since=since,
         kev_only=True,
     )

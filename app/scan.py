@@ -19,14 +19,24 @@ def run_scan(
     state_key: str,
     session,
     insecure: bool,
-    api_key: Optional[str],
     since,
-    no_rejected: bool = True,
     kev_only: bool = False,
 ) -> Tuple[List[dict], dict]:
     """
-    Returns (records_list, updated_state_entry)
-    state_all[state_key] = {"version": 3, "last_long_rescan": ISO, "per_cpe": {cpe: ISO}}
+    Run vulnerability scan for multiple CPE strings.
+
+    Args:
+        cpes: List of CPE 2.3 strings to scan
+        state_all: Current state dictionary
+        state_key: State key for this CPE set
+        session: Requests session
+        insecure: Skip TLS verification if True
+        since: Start datetime for scanning
+        kev_only: If True, return only KEV vulnerabilities
+
+    Returns:
+        Tuple of (records_list, updated_state_entry)
+        state_all[state_key] = {"version": 3, "last_long_rescan": ISO, "per_cpe": {cpe: ISO}}
     """
     now = now_utc()
     entry = state_all.get(state_key) or {}
@@ -43,9 +53,7 @@ def run_scan(
                 cpe,
                 since,
                 now,
-                api_key=api_key,
-                insecure=insecure,
-                no_rejected=no_rejected,
+                insecure,
             )
             any_success = True
             per_cpe[cpe] = iso(now)
