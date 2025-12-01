@@ -1,7 +1,16 @@
 from typing import List, Tuple, Optional, Dict
 
-from .utils import now_utc, iso
-from .nvd import fetch_for_cpe, extract_metrics, is_kev, extract_description, extract_cwes, extract_references
+from .utils import now_utc, iso, parse_iso
+from .vulnerabilitylookup import (
+    fetch_for_cpe,
+    extract_metrics,
+    is_kev,
+    extract_kev_data,
+    extract_epss,
+    extract_description,
+    extract_cwes,
+    extract_references,
+)
 
 
 def run_scan(
@@ -41,17 +50,29 @@ def run_scan(
             any_success = True
             per_cpe[cpe] = iso(now)
             for item in vulns:
-                cve_obj = item.get("cve", {}) or {}
-                cve_id = cve_obj.get("id")
+                # Vulnerability-Lookup format: CVE ID at top level or in 'id' field
+                cve_id = item.get("id") or item.get("cve", {}).get("id")
                 if not cve_id:
                     continue
+
                 metrics = extract_metrics(item)
+                epss_data = extract_epss(item)
+                kev_flag = is_kev(item)
+                kev_metadata = extract_kev_data(item) if kev_flag else {}
+
+                # Get dates - Vulnerability-Lookup uses different field names
+                published = item.get("Published") or item.get("published")
+                last_modified = item.get("last-modified") or item.get("lastModified") or item.get("Modified")
+
                 record = {
                     "cve": cve_id,
-                    "published": cve_obj.get("published"),
-                    "lastModified": cve_obj.get("lastModified"),
-                    "sourceIdentifier": cve_obj.get("sourceIdentifier"),
-                    "kev": is_kev(item),
+                    "published": published,
+                    "lastModified": last_modified,
+                    "sourceIdentifier": item.get("sourceIdentifier") or item.get("assigner"),
+                    "kev": kev_flag,
+                    "kev_data": kev_metadata,
+                    "epss": epss_data.get("score"),
+                    "epss_percentile": epss_data.get("percentile"),
                     "metrics": metrics,
                     "severity": metrics.get("baseSeverity") or "None",
                     "score": metrics.get("baseScore"),
@@ -59,7 +80,7 @@ def run_scan(
                     "matched_cpe_query": cpe,
                     "description": extract_description(item),
                     "cwes": extract_cwes(item),
-                    "vulnStatus": cve_obj.get("vulnStatus"),
+                    "vulnStatus": item.get("vulnStatus") or item.get("state"),
                 }
                 previous = all_vulns.get(cve_id)
                 if not previous or (record["lastModified"] or "") > (previous.get("lastModified") or ""):
