@@ -121,7 +121,7 @@ class ScanScheduler:
                 try:
                     # Use 24-hour lookback for scheduled scans
                     since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
-                    state_key = f"nvd:{hash_for_cpes(cpes)}"
+                    state_key = f"vuln:{hash_for_cpes(cpes)}"
 
                     # Run scan
                     results, updated_state = run_scan(
@@ -130,9 +130,7 @@ class ScanScheduler:
                         state_key=state_key,
                         session=session,
                         insecure=insecure,
-                        api_key=None,  # Add API key support if needed
                         since=since,
-                        no_rejected=True,
                         kev_only=False,
                     )
 

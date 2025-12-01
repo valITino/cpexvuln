@@ -57,8 +57,6 @@ def add_common_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--ca-bundle", default=None, help="Path to custom CA bundle (PEM).")
     p.add_argument("--insecure", action="store_true", help="Skip TLS verification (NOT recommended).")
     p.add_argument("--timeout", type=int, default=60, help="HTTP timeout (seconds).")
-    p.add_argument("--nvd-api-key", default=os.environ.get("NVD_API_KEY"),
-                   help="NVD API key (or set env NVD_API_KEY).")
 
 
 def main():
@@ -159,7 +157,7 @@ def main():
 
         # Stateful dedupe per unique CPE set
         state_all = load_json(STATE_FILE, {})
-        state_key = f"nvd:{hash_for_cpes(cpes)}"
+        state_key = f"vuln:{hash_for_cpes(cpes)}"
 
         results, updated_entry = run_scan(
             cpes=cpes,
@@ -167,9 +165,7 @@ def main():
             state_key=state_key,
             session=session,
             insecure=args.insecure,
-            api_key=args.nvd_api_key,
             since=since,
-            no_rejected=True,
             kev_only=False,
         )
 
@@ -181,7 +177,7 @@ def main():
         # Write NDJSON
         ensure_dir(args.out_dir)
         ts = now.strftime("%Y-%m-%d_%H%MZ")
-        out_path = os.path.join(args.out_dir, f"nvd_{ts}.jsonl")
+        out_path = os.path.join(args.out_dir, f"vuln_{ts}.jsonl")
         with open(out_path, "w", encoding="utf-8") as f:
             for r in results:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")

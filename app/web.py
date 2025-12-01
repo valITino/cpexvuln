@@ -622,11 +622,15 @@ def create_app(args):
             timeout=args.timeout,
         )
         state_all = load_json(STATE_FILE, {})
-        state_key = f"nvd:{hash_for_cpes(current['cpes'])}"
+        state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
-            cpes=current["cpes"], state_all=state_all, state_key=state_key,
-            session=session, insecure=current.get("insecure", False) or args.insecure,
-            api_key=args.nvd_api_key, since=force_since, no_rejected=True, kev_only=False,
+            cpes=current["cpes"],
+            state_all=state_all,
+            state_key=state_key,
+            session=session,
+            insecure=current.get("insecure", False) or args.insecure,
+            since=force_since,
+            kev_only=False,
         )
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
@@ -706,11 +710,15 @@ def create_app(args):
             timeout=args.timeout,
         )
         state_all = load_json(STATE_FILE, {})
-        state_key = f"nvd:{hash_for_cpes(current['cpes'])}"
+        state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
-            cpes=current["cpes"], state_all=state_all, state_key=state_key,
-            session=session, insecure=current.get("insecure", False) or args.insecure,
-            api_key=args.nvd_api_key, since=force_since, no_rejected=True, kev_only=False,
+            cpes=current["cpes"],
+            state_all=state_all,
+            state_key=state_key,
+            session=session,
+            insecure=current.get("insecure", False) or args.insecure,
+            since=force_since,
+            kev_only=False,
         )
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
@@ -739,7 +747,9 @@ def create_app(args):
             [
                 "CVE",
                 "Severity",
-                "Score",
+                "CVSS_Score",
+                "EPSS_Score",
+                "EPSS_Percentile",
                 "Published",
                 "LastModified",
                 "MatchedCPE",
@@ -751,11 +761,15 @@ def create_app(args):
         for r in results:
             sev = r.get("severity", "")
             score = r.get("score", "")
+            epss = r.get("epss", "")
+            epss_pct = r.get("epss_percentile", "")
             w.writerow(
                 [
                     r.get("cve", ""),
                     sev,
                     score,
+                    epss,
+                    epss_pct,
                     r.get("published", ""),
                     r.get("lastModified", ""),
                     r.get("matched_cpe_query", ""),
