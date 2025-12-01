@@ -180,7 +180,7 @@ Contains a `lists` array with watchlist entries:
 Tracks scan state using SHA-256 hash of CPE set:
 ```json
 {
-  "nvd:abc123": {
+  "vuln:abc123": {
     "version": 3,
     "last_long_rescan": "2025-12-01T12:30:00.000Z",
     "per_cpe": {
