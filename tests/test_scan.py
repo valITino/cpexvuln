@@ -25,7 +25,7 @@ def test_run_scan_logs_warning_on_error(monkeypatch, sample_cpe, capsys):
     results, updated = scan.run_scan(
         cpes=[sample_cpe],
         state_all={},
-        state_key="nvd:test",
+        state_key="vuln:test",
         session=object(),
         insecure=False,
         api_key=None,
@@ -62,7 +62,7 @@ def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
                 ],
                 "summary": "Example vuln",
                 "cwe": ["79"],
-                "references": [{"url": "https://example", "source": "NVD", "tags": ["Patch"]}],
+                "references": [{"url": "https://example", "source": "CIRCL", "tags": ["Patch"]}],
                 "state": "Analyzed",
                 "kev": {
                     "dateAdded": "2024-01-06"
@@ -108,7 +108,7 @@ def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
     results, updated = scan.run_scan(
         cpes=[sample_cpe],
         state_all=state,
-        state_key="nvd:test",
+        state_key="vuln:test",
         session=object(),
         insecure=False,
         api_key=None,

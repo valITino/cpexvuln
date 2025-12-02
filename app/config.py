@@ -27,5 +27,5 @@ SCAN_SCHEDULE = os.getenv("SCAN_SCHEDULE", "07:30,12:30,16:00,19:30").split(",")
 SCAN_HISTORY_FILE = DATA_DIR / "scan_history.json"
 SCAN_HISTORY_RETENTION_DAYS = int(os.getenv("SCAN_HISTORY_RETENTION_DAYS", "90"))
 
-# Safety baseline for backlog reset
+# Safety baseline for backlog reset (prevents scanning too far back in history)
 BACKLOG_RESET_DATE = datetime(2025, 2, 26, 0, 0, 0, tzinfo=timezone.utc)

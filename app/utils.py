@@ -15,7 +15,7 @@ def now_utc() -> datetime:
 
 
 def iso(dt: datetime) -> str:
-    """Return NVD-friendly ISO with millis and trailing Z (UTC)."""
+    """Return ISO 8601 timestamp with millis and trailing Z (UTC)."""
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
@@ -110,7 +110,7 @@ def has_specific_version(cpe_23: str) -> bool:
 # --- date range chunking ------------------------------------------------------
 
 def chunk_windows(start: datetime, end: datetime, max_days: int) -> Iterable[Tuple[datetime, datetime]]:
-    """Yield [start, end] windows sliced by max_days (NVD limit is 120 days)."""
+    """Yield [start, end] windows sliced by max_days."""
     cur = start
     while cur < end:
         nxt = min(cur + timedelta(days=max_days), end)

@@ -1,19 +1,19 @@
 {
-  "nvd:1d8d2f524b54cb87": {
+  "vuln:1d8d2f524b54cb87": {
     "last_long_rescan": "2025-09-23T08:01:56.000Z",
     "per_cpe": {
       "cpe:2.3:a:microsoft:365_apps:-:*:*:*:enterprise:*:x64:*": "2025-09-23T08:01:56.000Z"
     },
     "version": 3
   },
-  "nvd:6082a5fe70f2c5b0": {
+  "vuln:6082a5fe70f2c5b0": {
     "last_long_rescan": "2025-09-22T21:25:37.000Z",
     "per_cpe": {
       "cpe:2.3:o:canonical:ubuntu_linux:*:*:*:*:*:*:*": "2025-09-22T21:25:37.000Z"
     },
     "version": 3
   },
-  "nvd:7462ba2c30cbe941": {
+  "vuln:7462ba2c30cbe941": {
     "last_long_rescan": "2025-09-23T08:02:35.000Z",
     "per_cpe": {
       "cpe:2.3:o:cisco:ios:*:*:*:*:*:*:*": "2025-09-23T08:02:35.000Z"

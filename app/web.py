@@ -253,7 +253,7 @@ TEMPLATE = """<!doctype html>
                 <div class="flex items-center gap-2">
                   <button id="btnPrev" class="px-2 py-1 border rounded">&larr; Prev</button>
                   <button id="btnNext" class="px-2 py-1 border rounded">Next &rarr;</button>
-                  <a id="d_link" target="_blank" class="px-2 py-1 rounded bg-slate-900 text-white">Open on NVD</a>
+                  <a id="d_link" target="_blank" class="px-2 py-1 rounded bg-slate-900 text-white">View Details</a>
                 </div>
               </div>
               <div class="prose max-w-none">
@@ -443,7 +443,7 @@ TEMPLATE = """<!doctype html>
     document.getElementById('d_cve').textContent = r.cve + (r.kev ? '  (KEV)' : '') + (r.is_new ? '  (NEW)' : '');
     document.getElementById('d_meta').textContent = `Severity: ${sev}  •  CVSS: ${score}  •  EPSS: ${epss} (${epssPerc} percentile)  •  Modified: ${r.lastModified || ''}`;
     document.getElementById('d_desc').textContent = r.description || '(no description)';
-    document.getElementById('d_link').href = 'https://nvd.nist.gov/vuln/detail/' + r.cve;
+    document.getElementById('d_link').href = 'https://vulnerability.circl.lu/cve/' + r.cve;
 
     const cwes = (r.cwes || []).join(', ');
     document.getElementById('d_cwes').textContent = cwes ? ('CWE: ' + cwes) : '';
@@ -622,11 +622,11 @@ def create_app(args):
             timeout=args.timeout,
         )
         state_all = load_json(STATE_FILE, {})
-        state_key = f"nvd:{hash_for_cpes(current['cpes'])}"
+        state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
             cpes=current["cpes"], state_all=state_all, state_key=state_key,
             session=session, insecure=current.get("insecure", False) or args.insecure,
-            api_key=args.nvd_api_key, since=force_since, no_rejected=True, kev_only=False,
+            api_key=None, since=force_since, no_rejected=True, kev_only=False,
         )
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
@@ -706,11 +706,11 @@ def create_app(args):
             timeout=args.timeout,
         )
         state_all = load_json(STATE_FILE, {})
-        state_key = f"nvd:{hash_for_cpes(current['cpes'])}"
+        state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
             cpes=current["cpes"], state_all=state_all, state_key=state_key,
             session=session, insecure=current.get("insecure", False) or args.insecure,
-            api_key=args.nvd_api_key, since=force_since, no_rejected=True, kev_only=False,
+            api_key=None, since=force_since, no_rejected=True, kev_only=False,
         )
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry

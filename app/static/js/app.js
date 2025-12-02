@@ -862,7 +862,7 @@
           <td class="px-4 py-2 truncate max-w-[14rem]" title="${(item.matchedCPE || []).join(', ')}">${(item.matchedCPE || []).join(', ')}</td>
           <td class="px-4 py-2 text-sm">
             <button class="link" data-action="copy">Copy JSON</button>
-            <a class="link" data-action="open" href="https://nvd.nist.gov/vuln/detail/${item.id}" target="_blank">NVD</a>
+            <a class="link" data-action="open" href="https://vulnerability.circl.lu/cve/${item.id}" target="_blank">Details</a>
           </td>
         `;
         tr.dataset.index = String(idx);
@@ -913,7 +913,7 @@
         li.appendChild(a);
         dom.detailRefs.appendChild(li);
       });
-      dom.linkNvd.href = `https://nvd.nist.gov/vuln/detail/${item.id}`;
+      dom.linkNvd.href = `https://vulnerability.circl.lu/cve/${item.id}`;
     }
 
     function copyJson(item) {

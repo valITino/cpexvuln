@@ -180,7 +180,7 @@ Contains a `lists` array with watchlist entries:
 Tracks scan state using SHA-256 hash of CPE set:
 ```json
 {
-  "nvd:abc123": {
+  "vuln:abc123": {
     "version": 3,
     "last_long_rescan": "2025-12-01T12:30:00.000Z",
     "per_cpe": {
@@ -328,14 +328,6 @@ Combine multiple filters for precise results:
 - **KEV**: Show only CISA Known Exploited Vulnerabilities
 
 All filters work together (AND logic) and update the table in real-time.
-
-## Migration from NVD API
-This application has been migrated from the NVD 2.0 API to Vulnerability-Lookup:
-- **More data sources**: Vulnerability-Lookup aggregates from NVD, CISA, and other sources
-- **EPSS included**: Exploitation prediction built-in
-- **No API key needed**: Public access without authentication
-- **Same CPE format**: CPE 2.3 strings work identically
-- **Client-side filtering**: Date filtering handled by the application
 
 ## License
 [Include your license information here]
