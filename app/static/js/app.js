@@ -1,3 +1,7 @@
+/**
+ * CPExVTOPS - Vulnerability Management System
+ * Frontend Application Logic
+ */
 (function () {
   document.addEventListener('DOMContentLoaded', () => {
     const bootstrap = parseBootstrap();
@@ -16,16 +20,41 @@
   }
 
   function createApp(bootstrap) {
-    const csrfToken = bootstrap.csrfToken || document.querySelector('meta[name="csrf-token"]').content || '';
-    const collapsedKey = 'cpe-watch-collapsed-projects';
+    const csrfToken = bootstrap.csrfToken || document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const collapsedKey = 'cpexvtops-collapsed-projects';
+    const settingsKey = 'cpexvtops-settings';
+    const mitigatedKey = 'cpexvtops-mitigated';
+
+    // Load persisted state
     const collapsedInitial = new Set();
     try {
       const stored = window.localStorage.getItem(collapsedKey);
-      if (stored) {
-        JSON.parse(stored).forEach((id) => collapsedInitial.add(id));
-      }
+      if (stored) JSON.parse(stored).forEach((id) => collapsedInitial.add(id));
     } catch (err) {
       console.warn('Unable to read collapsed state', err);
+    }
+
+    // Load mitigated CVEs
+    let mitigatedCves = new Set();
+    try {
+      const stored = window.localStorage.getItem(mitigatedKey);
+      if (stored) JSON.parse(stored).forEach((id) => mitigatedCves.add(id));
+    } catch (err) {
+      console.warn('Unable to read mitigated state', err);
+    }
+
+    // Load settings
+    let settings = {
+      scanTimes: '07:30,12:30,16:00,19:30',
+      cvssThreshold: 0,
+      epssThreshold: 0,
+      autoRefresh: false,
+    };
+    try {
+      const stored = window.localStorage.getItem(settingsKey);
+      if (stored) settings = { ...settings, ...JSON.parse(stored) };
+    } catch (err) {
+      console.warn('Unable to read settings', err);
     }
 
     const state = {
@@ -36,27 +65,61 @@
       filteredResults: [],
       windowLabel: bootstrap.windowLabel || '',
       initialIssues: bootstrap.issues || [],
-      filters: { text: '', severity: '', minScore: '', kevOnly: false },
-      sortKey: 'mod',
+      filters: {
+        cve: '',
+        text: '',
+        epss: '',
+        score: '',
+        kev: '',
+        dateFilter: 'custom',
+        showAll: false,
+        showMitigated: false,
+        showNew: true,
+      },
+      sortKey: 'pub',
       sortDir: -1,
       detailIndex: -1,
       manageMode: false,
       selectedIds: new Set(),
       collapsed: collapsedInitial,
       pendingRun: false,
+      cpeList: [],
+      scheduleIntervals: settings.scanTimes.split(',').filter(Boolean),
+      scanPeriod: '7d',
+      currentPage: 1,
+      pageSize: 25,
     };
 
+    // DOM references
     const dom = {
       alerts: document.getElementById('alerts'),
       projectsContainer: document.getElementById('projectsContainer'),
       searchInput: document.getElementById('wlSearch'),
       selectModeBtn: document.getElementById('selectMode'),
       selectAllBox: document.getElementById('wlSelectAll'),
+      selectedCount: document.getElementById('selectedCount'),
       deleteSelectedBtn: document.getElementById('btnDeleteSelected'),
       newWatchBtn: document.getElementById('btnNewWatch'),
       newProjectBtn: document.getElementById('btnNewProject'),
-      collapseAllBtn: document.getElementById('btnCollapseAll'),
-      expandAllBtn: document.getElementById('btnExpandAll'),
+
+      // CPE Builder
+      builderToggle: document.getElementById('builderToggle'),
+      builderBody: document.getElementById('builderBody'),
+      builderOutput: document.getElementById('b_output'),
+      builderSuggestions: document.getElementById('builderSuggestions'),
+      cpeList: document.getElementById('cpeList'),
+      manualCpeInput: document.getElementById('manualCpeInput'),
+      btnAddManualCpe: document.getElementById('btnAddManualCpe'),
+      btnAddCpe: document.getElementById('b_add'),
+
+      // Schedule
+      scheduleIntervals: document.getElementById('scheduleIntervals'),
+      btnAddInterval: document.getElementById('btnAddInterval'),
+      scanFromDate: document.getElementById('scanFromDate'),
+      scanToDate: document.getElementById('scanToDate'),
+      btnSaveAndScan: document.getElementById('btnSaveAndScan'),
+
+      // Form
       form: document.getElementById('watchForm'),
       formId: document.getElementById('formWatchId'),
       formTitle: document.getElementById('formTitle'),
@@ -64,71 +127,84 @@
       formProject: document.getElementById('formProject'),
       formName: document.getElementById('formName'),
       formCpes: document.getElementById('formCpes'),
+      formComments: document.getElementById('formComments'),
       optNoRejected: document.getElementById('optNoRejected'),
       optIsVulnerable: document.getElementById('optIsVulnerable'),
       optHasKev: document.getElementById('optHasKev'),
       optInsecure: document.getElementById('optInsecure'),
-      optMinCvss: document.getElementById('optMinCvss'),
-      optApiKey: document.getElementById('optApiKey'),
       optHttpProxy: document.getElementById('optHttpProxy'),
       optHttpsProxy: document.getElementById('optHttpsProxy'),
       optCaBundle: document.getElementById('optCaBundle'),
       optTimeout: document.getElementById('optTimeout'),
-      optCveId: document.getElementById('optCveId'),
-      optCweId: document.getElementById('optCweId'),
-      optCvssV3Severity: document.getElementById('optCvssV3Severity'),
-      optCvssV4Severity: document.getElementById('optCvssV4Severity'),
-      optCvssV3Metrics: document.getElementById('optCvssV3Metrics'),
-      optCvssV4Metrics: document.getElementById('optCvssV4Metrics'),
-      apiKeyHint: document.getElementById('apiKeyHint'),
       formWarnings: document.getElementById('formWarnings'),
-      btnRun24: document.getElementById('btnRun24'),
-      btnRun90: document.getElementById('btnRun90'),
-      btnRun120: document.getElementById('btnRun120'),
-      btnSaveOnly: document.getElementById('btnSaveOnly'),
+      btnSaveWatch: document.getElementById('btnSaveWatch'),
       btnDeleteWatch: document.getElementById('btnDeleteWatch'),
-      builderToggle: document.getElementById('builderToggle'),
-      builderBody: document.getElementById('builderBody'),
-      builderOutput: document.getElementById('b_output'),
-      builderSuggestions: document.getElementById('builderSuggestions'),
+
+      // Filters
+      filterCve: document.getElementById('f_cve'),
       filterText: document.getElementById('f_text'),
-      filterSeverity: document.getElementById('f_sev'),
+      filterEpss: document.getElementById('f_epss'),
       filterScore: document.getElementById('f_score'),
       filterKev: document.getElementById('f_kev'),
+      btnFilter: document.getElementById('btnFilter'),
       filterClear: document.getElementById('f_clear'),
-      filterPills: document.getElementById('filterPills'),
+      filterAll: document.getElementById('f_all'),
+      filterMitigated: document.getElementById('f_mitigated'),
+      filterNew: document.getElementById('f_new'),
+
+      // Results
       windowLabel: document.getElementById('windowLabel'),
       resCount: document.getElementById('resCount'),
       resBody: document.getElementById('resBody'),
+      btnExportCsv: document.getElementById('btnExportCsv'),
+      btnExportNdjson: document.getElementById('btnExportNdjson'),
+
+      // Pagination
+      btnPrevPage: document.getElementById('btnPrevPage'),
+      btnNextPage: document.getElementById('btnNextPage'),
+      pageInfo: document.getElementById('pageInfo'),
+
+      // Detail panel
       detailPanel: document.getElementById('detailPanel'),
       detailCve: document.getElementById('d_cve'),
       detailMeta: document.getElementById('d_meta'),
       detailMatched: document.getElementById('d_matched'),
       detailDesc: document.getElementById('d_desc'),
       detailCwes: document.getElementById('d_cwes'),
+      detailKev: document.getElementById('d_kev'),
+      detailKevDetails: document.getElementById('d_kev_details'),
       detailRefs: document.getElementById('d_refs_list'),
       btnPrev: document.getElementById('btnPrev'),
       btnNext: document.getElementById('btnNext'),
       btnCopyJson: document.getElementById('btnCopyJson'),
+      btnMarkMitigated: document.getElementById('btnMarkMitigated'),
       linkNvd: document.getElementById('d_link'),
-      btnExportCsv: document.getElementById('btnExportCsv'),
-      btnExportNdjson: document.getElementById('btnExportNdjson'),
+
+      // Settings modal
+      settingsModal: document.getElementById('settingsModal'),
+      btnSettings: document.getElementById('btnSettings'),
+      btnCloseSettings: document.getElementById('btnCloseSettings'),
+      btnCancelSettings: document.getElementById('btnCancelSettings'),
+      btnSaveSettings: document.getElementById('btnSaveSettings'),
+      settingScanTimes: document.getElementById('settingScanTimes'),
+      settingCvssThreshold: document.getElementById('settingCvssThreshold'),
+      settingEpssThreshold: document.getElementById('settingEpssThreshold'),
+      settingAutoRefresh: document.getElementById('settingAutoRefresh'),
+
+      // Interval modal
+      intervalModal: document.getElementById('intervalModal'),
+      btnCloseInterval: document.getElementById('btnCloseInterval'),
+      btnCancelInterval: document.getElementById('btnCancelInterval'),
+      btnConfirmInterval: document.getElementById('btnConfirmInterval'),
+      intervalTime: document.getElementById('intervalTime'),
     };
 
     const builderFields = [
-      'b_part',
-      'b_vendor',
-      'b_product',
-      'b_version',
-      'b_update',
-      'b_edition',
-      'b_language',
-      'b_sw',
-      'b_tsw',
-      'b_thw',
-      'b_other',
+      'b_part', 'b_vendor', 'b_product', 'b_version', 'b_update',
+      'b_edition', 'b_language', 'b_sw', 'b_tsw', 'b_thw', 'b_other',
     ].map((id) => document.getElementById(id));
 
+    // API functions
     const api = {
       async getWatchlists() {
         const data = await requestJson('/api/watchlists');
@@ -138,52 +214,25 @@
         populateProjectSelect();
       },
       async createProject(name) {
-        return requestJson('/api/projects', {
-          method: 'POST',
-          body: { name },
-        });
+        return requestJson('/api/projects', { method: 'POST', body: { name } });
       },
       async renameProject(id, name) {
-        return requestJson(`/api/projects/${id}`, {
-          method: 'PATCH',
-          body: { name },
-        });
+        return requestJson(`/api/projects/${id}`, { method: 'PATCH', body: { name } });
       },
       async deleteProject(id) {
         return requestJson(`/api/projects/${id}`, { method: 'DELETE' });
       },
-      async importProject(id, payload) {
-        return requestJson(`/api/projects/${id}/import`, {
-          method: 'POST',
-          body: payload,
-        });
-      },
       async createWatchlist(payload) {
-        return requestJson('/api/watchlists', {
-          method: 'POST',
-          body: payload,
-        });
+        return requestJson('/api/watchlists', { method: 'POST', body: payload });
       },
       async updateWatchlist(id, payload) {
-        return requestJson(`/api/watchlists/${id}`, {
-          method: 'PUT',
-          body: payload,
-        });
+        return requestJson(`/api/watchlists/${id}`, { method: 'PUT', body: payload });
       },
       async deleteWatchlist(id) {
         return requestJson(`/api/watchlists/${id}`, { method: 'DELETE' });
       },
-      async reorder(projectId, order) {
-        return requestJson('/api/watchlists/reorder', {
-          method: 'POST',
-          body: { projectId, order },
-        });
-      },
       async runWatchlist(id, window) {
-        return requestJson('/api/run', {
-          method: 'POST',
-          body: { watchlistId: id, window },
-        });
+        return requestJson('/api/run', { method: 'POST', body: { watchlistId: id, window } });
       },
       async suggestCpe(params) {
         const qs = new URLSearchParams(params);
@@ -191,40 +240,22 @@
       },
     };
 
-    function toJsonBody(body) {
-      return body instanceof FormData ? body : JSON.stringify(body || {});
-    }
-
     async function requestJson(url, options = {}) {
       const opts = { method: 'GET', headers: { 'X-CSRF-Token': csrfToken } };
-      if (options.method) {
-        opts.method = options.method;
-      }
+      if (options.method) opts.method = options.method;
       if (options.body !== undefined) {
-        if (options.body instanceof FormData) {
-          opts.body = options.body;
-        } else {
-          opts.headers['Content-Type'] = 'application/json';
-          opts.body = toJsonBody(options.body);
-        }
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(options.body);
       }
       try {
         const res = await fetch(url, opts);
         const text = await res.text();
         let data = {};
         if (text) {
-          try {
-            data = JSON.parse(text);
-          } catch (err) {
-            data = {};
-          }
+          try { data = JSON.parse(text); } catch (err) { data = {}; }
         }
         if (!res.ok) {
-          const message =
-            (data && (data.error || data.message)) ||
-            text ||
-            res.statusText ||
-            'Request failed';
+          const message = (data && (data.error || data.message)) || text || res.statusText || 'Request failed';
           const error = new Error(message);
           error.status = res.status;
           throw error;
@@ -236,28 +267,21 @@
       }
     }
 
-    function formatIssue(issue) {
-      if (!issue) return 'Unknown issue';
-      if (typeof issue === 'string') return issue;
-      const parts = [];
-      if (issue.watchlistName) {
-        parts.push(`[${issue.watchlistName}]`);
-      }
-      if (issue.window) {
-        parts.push(issue.window);
-      }
-      if (issue.cpe) {
-        parts.push(`CPE ${issue.cpe}`);
-      }
-      const prefix = parts.length ? `${parts.join(' ')}: ` : '';
-      return `${prefix}${issue.message || 'Unknown error'}`;
+    // Utility functions
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
     }
 
-    function displayIssues(issues) {
-      if (!Array.isArray(issues) || !issues.length) return;
-      issues.forEach((issue) => {
-        showAlert(formatIssue(issue), 'warning', 10000);
-      });
+    function showAlert(message, level = 'info', timeout = 5000) {
+      if (!dom.alerts) return;
+      const box = document.createElement('div');
+      box.className = `flash flash--${level}`;
+      box.textContent = message;
+      dom.alerts.appendChild(box);
+      if (timeout) setTimeout(() => box.remove(), timeout);
     }
 
     function saveCollapsed() {
@@ -268,21 +292,20 @@
       }
     }
 
-    function showAlert(message, level = 'info', timeout = 5000) {
-      if (!dom.alerts) return;
-      const box = document.createElement('div');
-      box.className = `flash flash--${level}`;
-      box.textContent = message;
-      dom.alerts.appendChild(box);
-      if (timeout) {
-        setTimeout(() => {
-          box.remove();
-        }, timeout);
+    function saveMitigated() {
+      try {
+        window.localStorage.setItem(mitigatedKey, JSON.stringify(Array.from(mitigatedCves)));
+      } catch (err) {
+        console.warn('Unable to persist mitigated state', err);
       }
     }
 
-    function clearAlerts() {
-      dom.alerts.innerHTML = '';
+    function saveSettings() {
+      try {
+        window.localStorage.setItem(settingsKey, JSON.stringify(settings));
+      } catch (err) {
+        console.warn('Unable to persist settings', err);
+      }
     }
 
     function findWatchlist(id) {
@@ -295,259 +318,184 @@
         .sort((a, b) => (a.order || 0) - (b.order || 0));
     }
 
+    // Sidebar rendering with team cards
     function renderSidebar() {
       if (!dom.projectsContainer) return;
       dom.projectsContainer.innerHTML = '';
-      state.projects
-        .slice()
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-        .forEach((project) => {
-          const wrapper = document.createElement('section');
-          wrapper.className = 'project-block';
-          wrapper.dataset.projectId = project.id;
 
-          const header = document.createElement('div');
-          header.className = 'project-header';
-          const collapseBtn = document.createElement('button');
-          collapseBtn.type = 'button';
-          collapseBtn.className = 'link';
-          collapseBtn.textContent = state.collapsed.has(project.id) ? '▶' : '▼';
-          collapseBtn.addEventListener('click', () => {
-            if (state.collapsed.has(project.id)) {
-              state.collapsed.delete(project.id);
-            } else {
-              state.collapsed.add(project.id);
-            }
-            saveCollapsed();
-            renderSidebar();
-          });
+      // Empty state
+      if (state.projects.length === 0) {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'text-center py-8 px-4';
+        emptyState.innerHTML = `
+          <svg viewBox="0 0 24 24" class="h-12 w-12 mx-auto text-slate-300 mb-3" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M12 8v4m0 4h.01"/>
+          </svg>
+          <p class="text-slate-500 text-sm mb-2">No teams yet</p>
+          <p class="text-slate-400 text-xs mb-4">Create a team to start monitoring vulnerabilities</p>
+          <button id="emptyStateNewTeam" class="btn btn--primary">Create First Team</button>
+        `;
+        dom.projectsContainer.appendChild(emptyState);
+        emptyState.querySelector('#emptyStateNewTeam')?.addEventListener('click', async () => {
+          const name = prompt('Team name', 'My First Team');
+          if (!name) return;
+          await api.createProject(name);
+          await api.getWatchlists();
+        });
+        return;
+      }
 
-          const title = document.createElement('span');
-          title.className = 'font-semibold flex-1 truncate';
-          title.textContent = project.name;
+      state.projects.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((project) => {
+        const wrapper = document.createElement('section');
+        wrapper.className = 'team-card' + (state.currentWatchId && findWatchlist(state.currentWatchId)?.projectId === project.id ? ' team-card--active' : '');
+        wrapper.dataset.projectId = project.id;
 
-          const count = document.createElement('span');
+        const header = document.createElement('div');
+        header.className = 'team-card__header';
+
+        // Checkbox for selection
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = `h-4 w-4 ${state.manageMode ? '' : 'hidden'}`;
+        checkbox.checked = state.selectedIds.has(project.id);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) state.selectedIds.add(project.id);
+          else state.selectedIds.delete(project.id);
+          updateBulkState();
+        });
+
+        // Play button
+        const playBtn = document.createElement('button');
+        playBtn.className = 'team-card__action team-card__action--play';
+        playBtn.innerHTML = '<svg viewBox="0 0 24 24" class="h-4 w-4" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+        playBtn.title = 'Run scan';
+        playBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const lists = sortedListsFor(project.id);
-          const activeCount = lists.length;
-          const projectCpes = lists.flatMap((wl) => wl.cpes);
-          const projectMatches = state.filteredResults.filter((item) => (item.matchedCPE || []).some((cpe) => projectCpes.includes(cpe))).length;
-          count.className = 'text-xs text-slate-500';
-          count.textContent = `${activeCount} watch${activeCount === 1 ? '' : 'es'} • ${projectMatches} match${projectMatches === 1 ? '' : 'es'}`;
-
-          const menuBtn = document.createElement('button');
-          menuBtn.type = 'button';
-          menuBtn.className = 'more-btn';
-          menuBtn.textContent = '⋯';
-          menuBtn.addEventListener('click', (evt) => {
-            evt.preventDefault();
-            evt.stopPropagation();
-            toggleProjectMenu(wrapper, project.id);
-          });
-
-          header.appendChild(collapseBtn);
-          header.appendChild(title);
-          header.appendChild(count);
-          header.appendChild(menuBtn);
-
-          wrapper.appendChild(header);
-
-          const menu = document.createElement('div');
-          menu.className = 'menuPanel hidden';
-          menu.innerHTML = `
-            <button class="menuPanel__item" data-action="rename">Rename</button>
-            <button class="menuPanel__item" data-action="import">Import JSON</button>
-            <a class="menuPanel__item" data-action="export" href="/api/projects/${project.id}/export">Export JSON</a>
-            <button class="menuPanel__item menuPanel__item--danger" data-action="delete">Delete</button>
-          `;
-          menu.addEventListener('click', (evt) => {
-            const target = evt.target;
-            if (!(target instanceof HTMLElement)) return;
-            const action = target.dataset.action;
-            if (!action) return;
-            evt.preventDefault();
-            handleProjectAction(project.id, action);
-            menu.classList.add('hidden');
-          });
-          wrapper.appendChild(menu);
-
-          const listEl = document.createElement('ul');
-          listEl.className = 'project-watchlists';
-          if (state.collapsed.has(project.id)) {
-            listEl.classList.add('hidden');
+          if (lists.length > 0) {
+            selectWatchlist(lists[0].id, true, state.scanPeriod === 'custom' ? '24h' : state.scanPeriod);
           }
+        });
+
+        // Team name
+        const nameEl = document.createElement('span');
+        nameEl.className = 'font-semibold flex-1 truncate cursor-pointer';
+        nameEl.textContent = project.name;
+        nameEl.addEventListener('click', () => {
+          if (state.collapsed.has(project.id)) {
+            state.collapsed.delete(project.id);
+          } else {
+            state.collapsed.add(project.id);
+          }
+          saveCollapsed();
+          renderSidebar();
+        });
+
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'team-card__action';
+        editBtn.innerHTML = '<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+        editBtn.title = 'Edit team';
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const newName = prompt('Team name', project.name);
+          if (newName && newName !== project.name) {
+            api.renameProject(project.id, newName).then(() => api.getWatchlists());
+          }
+        });
+
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'team-card__action team-card__action--delete';
+        deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+        deleteBtn.title = 'Delete team';
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (confirm('Delete this team? Teams must be empty.')) {
+            api.deleteProject(project.id).then(() => api.getWatchlists());
+          }
+        });
+
+        header.appendChild(checkbox);
+        header.appendChild(playBtn);
+        header.appendChild(nameEl);
+        header.appendChild(editBtn);
+        header.appendChild(deleteBtn);
+        wrapper.appendChild(header);
+
+        // CPE list (collapsible)
+        if (!state.collapsed.has(project.id)) {
+          const lists = sortedListsFor(project.id);
+          const cpeContainer = document.createElement('div');
+          cpeContainer.className = 'mt-2 space-y-1';
 
           lists.forEach((watch) => {
-            const li = document.createElement('li');
-            li.className = `watchlist-entry ${state.currentWatchId === watch.id ? 'watchlist-entry--active' : ''}`;
-            li.draggable = true;
-            li.dataset.id = watch.id;
-            li.dataset.projectId = project.id;
-
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.className = `wlbox h-4 w-4 mt-0.5 ${state.manageMode ? '' : 'hidden'}`;
-            checkbox.checked = state.selectedIds.has(watch.id);
-            checkbox.addEventListener('change', () => {
-              if (checkbox.checked) {
-                state.selectedIds.add(watch.id);
-              } else {
-                state.selectedIds.delete(watch.id);
+            watch.cpes.forEach((cpe, idx) => {
+              if (idx < 3) { // Show max 3 CPEs
+                const cpeEl = document.createElement('div');
+                cpeEl.className = 'cpe-item';
+                const cpeShort = (cpe || '').replace('cpe:2.3:', '');
+                cpeEl.innerHTML = `
+                  <span class="cpe-item__name" title="${escapeHtml(cpe)}">${escapeHtml(cpeShort)}</span>
+                  <span class="cpe-item__status cpe-item__status--ok"></span>
+                `;
+                cpeEl.addEventListener('click', () => selectWatchlist(watch.id, false));
+                cpeContainer.appendChild(cpeEl);
               }
-              updateBulkState();
             });
-
-            const nameLink = document.createElement('a');
-            nameLink.href = '#';
-            nameLink.className = 'wlLink min-w-0';
-            nameLink.innerHTML = `
-              <div class="text-sm font-medium truncate">${watch.name}</div>
-              <div class="text-xs text-slate-500 truncate">${watch.cpes.length} CPE${watch.cpes.length === 1 ? '' : 's'}</div>
-            `;
-            nameLink.addEventListener('click', (evt) => {
-              evt.preventDefault();
-              if (state.manageMode) return;
-              selectWatchlist(watch.id, false);
-            });
-
-            const quickContainer = document.createElement('div');
-            quickContainer.className = 'entry-actions';
-            quickContainer.innerHTML = `
-              <button class="quick-btn" data-win="24h">24h</button>
-              <button class="quick-btn" data-win="90d">90d</button>
-              <button class="quick-btn" data-win="120d">120d</button>
-            `;
-            quickContainer.querySelectorAll('.quick-btn').forEach((btn) => {
-              btn.addEventListener('click', (evt) => {
-                evt.preventDefault();
-                evt.stopPropagation();
-                const win = btn.dataset.win || '24h';
-                selectWatchlist(watch.id, true, win);
-              });
-            });
-
-            li.appendChild(checkbox);
-            li.appendChild(nameLink);
-            li.appendChild(quickContainer);
-
-            li.addEventListener('dragstart', (evt) => {
-              evt.dataTransfer.effectAllowed = 'move';
-              evt.dataTransfer.setData('text/plain', watch.id);
-              setTimeout(() => {
-                li.classList.add('dragging');
-              }, 0);
-            });
-            li.addEventListener('dragend', () => {
-              li.classList.remove('dragging');
-            });
-
-            listEl.appendChild(li);
-          });
-
-          listEl.addEventListener('dragover', (evt) => {
-            evt.preventDefault();
-            const dragging = document.querySelector('.dragging');
-            if (!(dragging instanceof HTMLElement)) return;
-            const after = getDragAfterElement(listEl, evt.clientY);
-            if (after == null) {
-              listEl.appendChild(dragging);
-            } else {
-              listEl.insertBefore(dragging, after);
+            if (watch.cpes.length > 3) {
+              const moreEl = document.createElement('div');
+              moreEl.className = 'text-xs text-slate-400 pl-2';
+              moreEl.textContent = `+${watch.cpes.length - 3} more...`;
+              cpeContainer.appendChild(moreEl);
             }
           });
 
-          listEl.addEventListener('drop', (evt) => {
-            evt.preventDefault();
-            const watchId = evt.dataTransfer.getData('text/plain');
-            if (!watchId) return;
-            const ids = Array.from(listEl.querySelectorAll('li')).map((li) => li.dataset.id).filter(Boolean);
-            moveWatchlist(watchId, project.id, ids);
-          });
-
-          wrapper.appendChild(listEl);
-          dom.projectsContainer.appendChild(wrapper);
-        });
-    }
-
-    function toggleProjectMenu(wrapper, projectId) {
-      wrapper.querySelectorAll('.menuPanel').forEach((panel) => {
-        panel.classList.toggle('hidden');
-      });
-      document.addEventListener(
-        'click',
-        function handler(evt) {
-          if (!(evt.target instanceof Node)) return;
-          if (!wrapper.contains(evt.target)) {
-            wrapper.querySelectorAll('.menuPanel').forEach((panel) => panel.classList.add('hidden'));
-            document.removeEventListener('click', handler);
+          // Scheduled scans display
+          if (state.scheduleIntervals.length > 0) {
+            const schedDiv = document.createElement('div');
+            schedDiv.className = 'scheduled-scans';
+            schedDiv.innerHTML = '<div class="text-xs font-medium text-slate-500 mb-1">Scheduled:</div>';
+            state.scheduleIntervals.slice(0, 4).forEach((time, idx) => {
+              const scanEl = document.createElement('div');
+              scanEl.className = 'scheduled-scan';
+              scanEl.innerHTML = `
+                <span>Scan ${idx + 1}</span>
+                <span class="scheduled-scan__time">${time}</span>
+              `;
+              schedDiv.appendChild(scanEl);
+            });
+            cpeContainer.appendChild(schedDiv);
           }
-        },
-        { once: true }
-      );
-    }
 
-    function getDragAfterElement(container, y) {
-      const draggableElements = [...container.querySelectorAll('li:not(.dragging)')];
-      return draggableElements.reduce(
-        (closest, child) => {
-          const box = child.getBoundingClientRect();
-          const offset = y - box.top - box.height / 2;
-          if (offset < 0 && offset > closest.offset) {
-            return { offset, element: child };
+          // Comments preview
+          const watch = lists[0];
+          if (watch?.comments) {
+            const commentDiv = document.createElement('div');
+            commentDiv.className = 'mt-2 p-2 bg-slate-50 rounded text-xs text-slate-600';
+            commentDiv.textContent = watch.comments.substring(0, 100) + (watch.comments.length > 100 ? '...' : '');
+            cpeContainer.appendChild(commentDiv);
           }
-          return closest;
-        },
-        { offset: Number.NEGATIVE_INFINITY, element: null }
-      ).element;
-    }
 
-    async function moveWatchlist(watchId, projectId, orderIds) {
-      const watch = findWatchlist(watchId);
-      if (!watch) return;
-      const oldProject = watch.projectId;
-      watch.projectId = projectId;
-      watch.order = orderIds.indexOf(watchId);
-      const projectOrder = orderIds.filter(Boolean);
-      state.lists
-        .filter((w) => w.projectId === projectId)
-        .forEach((w, idx) => {
-          const pos = projectOrder.indexOf(w.id);
-          if (pos >= 0) {
-            w.order = pos;
-          }
-        });
-      renderSidebar();
-      populateProjectSelect();
-      try {
-        await api.updateWatchlist(watchId, { projectId });
-        await api.reorder(projectId, projectOrder);
-        if (oldProject !== projectId) {
-          await api.reorder(oldProject, sortedListsFor(oldProject).map((w) => w.id));
+          wrapper.appendChild(cpeContainer);
         }
-        showAlert('Watchlist moved.', 'success', 2000);
-      } catch (err) {
-        console.error('Failed to move watchlist', err);
-        api.getWatchlists();
-      }
+
+        dom.projectsContainer.appendChild(wrapper);
+      });
+
+      updateBulkState();
     }
 
     function populateProjectSelect() {
       if (!dom.formProject) return;
       dom.formProject.innerHTML = '';
-      state.projects
-        .slice()
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-        .forEach((project) => {
-          const option = document.createElement('option');
-          option.value = project.id;
-          option.textContent = project.name;
-          dom.formProject.appendChild(option);
-        });
-      if (state.currentWatchId) {
-        const current = findWatchlist(state.currentWatchId);
-        if (current) {
-          dom.formProject.value = current.projectId;
-        }
-      }
+      state.projects.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((project) => {
+        const option = document.createElement('option');
+        option.value = project.id;
+        option.textContent = project.name;
+        dom.formProject.appendChild(option);
+      });
     }
 
     function selectWatchlist(id, runImmediately = false, window = '24h') {
@@ -563,104 +511,73 @@
       fillForm(watch);
       renderSidebar();
       updateBulkState();
-      if (runImmediately) {
-        runCurrent(window);
-      }
+      if (runImmediately) runCurrent(window);
     }
 
     function clearForm() {
-      dom.formId.value = '';
-      dom.formTitle.textContent = 'Create watch';
-      dom.formProjectLabel.textContent = '';
-      dom.formName.value = '';
-      dom.formCpes.value = '';
-      dom.optNoRejected.checked = true;
-      dom.optIsVulnerable.checked = false;
-      dom.optHasKev.checked = false;
-      dom.optInsecure.checked = false;
-      dom.optMinCvss.value = '';
-      dom.optApiKey.value = '';
-      dom.apiKeyHint.textContent = '';
-      dom.optHttpProxy.value = '';
-      dom.optHttpsProxy.value = '';
-      dom.optCaBundle.value = '';
-      dom.optTimeout.value = '';
-      dom.optCveId.value = '';
-      dom.optCweId.value = '';
-      dom.optCvssV3Severity.value = '';
-      dom.optCvssV4Severity.value = '';
-      dom.optCvssV3Metrics.value = '';
-      dom.optCvssV4Metrics.value = '';
-      dom.formWarnings.textContent = '';
-      if (dom.formProject.options.length > 0) {
-        dom.formProject.selectedIndex = 0;
-      }
-      checkFormWarnings();
+      if (dom.formId) dom.formId.value = '';
+      if (dom.formTitle) dom.formTitle.textContent = 'Create team';
+      if (dom.formProjectLabel) dom.formProjectLabel.textContent = '';
+      if (dom.formName) dom.formName.value = '';
+      if (dom.formCpes) dom.formCpes.value = '';
+      if (dom.formComments) dom.formComments.value = '';
+      if (dom.optNoRejected) dom.optNoRejected.checked = true;
+      if (dom.optIsVulnerable) dom.optIsVulnerable.checked = false;
+      if (dom.optHasKev) dom.optHasKev.checked = false;
+      if (dom.optInsecure) dom.optInsecure.checked = false;
+      if (dom.optHttpProxy) dom.optHttpProxy.value = '';
+      if (dom.optHttpsProxy) dom.optHttpsProxy.value = '';
+      if (dom.optCaBundle) dom.optCaBundle.value = '';
+      if (dom.optTimeout) dom.optTimeout.value = '';
+      if (dom.formWarnings) dom.formWarnings.textContent = '';
+      state.cpeList = [];
+      renderCpeList();
     }
 
     function fillForm(watch) {
-      dom.formId.value = watch.id;
-      dom.formTitle.textContent = 'Edit watch';
+      if (dom.formId) dom.formId.value = watch.id;
+      if (dom.formTitle) dom.formTitle.textContent = 'Edit team';
       const project = state.projects.find((p) => p.id === watch.projectId);
-      dom.formProjectLabel.textContent = project ? project.name : '';
-      dom.formProject.value = watch.projectId;
-      dom.formName.value = watch.name || '';
-      dom.formCpes.value = watch.cpes.join(', ');
+      if (dom.formProjectLabel) dom.formProjectLabel.textContent = project ? project.name : '';
+      if (dom.formProject) dom.formProject.value = watch.projectId;
+      if (dom.formName) dom.formName.value = watch.name || '';
+      if (dom.formCpes) dom.formCpes.value = watch.cpes.join(', ');
+      if (dom.formComments) dom.formComments.value = watch.comments || '';
       const options = watch.options || {};
-      dom.optNoRejected.checked = options.noRejected !== false;
-      dom.optIsVulnerable.checked = Boolean(options.isVulnerable);
-      dom.optHasKev.checked = Boolean(options.hasKev);
-      dom.optInsecure.checked = Boolean(options.insecure);
-      dom.optMinCvss.value = options.minCvss ? String(options.minCvss) : '';
-      dom.optHttpProxy.value = options.httpProxy || '';
-      dom.optHttpsProxy.value = options.httpsProxy || '';
-      dom.optCaBundle.value = options.caBundle || '';
-      dom.optTimeout.value = options.timeout || '';
-      dom.optCveId.value = options.cveId || '';
-      dom.optCweId.value = options.cweId || '';
-      dom.optCvssV3Severity.value = options.cvssV3Severity || '';
-      dom.optCvssV4Severity.value = options.cvssV4Severity || '';
-      dom.optCvssV3Metrics.value = options.cvssV3Metrics || '';
-      dom.optCvssV4Metrics.value = options.cvssV4Metrics || '';
-      dom.optApiKey.value = '';
-      dom.apiKeyHint.textContent = options.hasApiKey ? 'API key stored (leave blank to keep, enter blank space to clear).' : '';
-      dom.formWarnings.textContent = '';
-      checkFormWarnings();
+      if (dom.optNoRejected) dom.optNoRejected.checked = options.noRejected !== false;
+      if (dom.optIsVulnerable) dom.optIsVulnerable.checked = Boolean(options.isVulnerable);
+      if (dom.optHasKev) dom.optHasKev.checked = Boolean(options.hasKev);
+      if (dom.optInsecure) dom.optInsecure.checked = Boolean(options.insecure);
+      if (dom.optHttpProxy) dom.optHttpProxy.value = options.httpProxy || '';
+      if (dom.optHttpsProxy) dom.optHttpsProxy.value = options.httpsProxy || '';
+      if (dom.optCaBundle) dom.optCaBundle.value = options.caBundle || '';
+      if (dom.optTimeout) dom.optTimeout.value = options.timeout || '';
+      state.cpeList = [...watch.cpes];
+      renderCpeList();
     }
 
     function gatherFormData() {
-      const payload = {
-        name: dom.formName.value,
-        projectId: dom.formProject.value,
-        cpes: dom.formCpes.value,
+      return {
+        name: dom.formName?.value || '',
+        projectId: dom.formProject?.value || '',
+        cpes: state.cpeList.length > 0 ? state.cpeList.join(', ') : (dom.formCpes?.value || ''),
+        comments: dom.formComments?.value || '',
         options: {
-          noRejected: dom.optNoRejected.checked,
-          isVulnerable: dom.optIsVulnerable.checked,
-          hasKev: dom.optHasKev.checked,
-          insecure: dom.optInsecure.checked,
-          minCvss: dom.optMinCvss.value,
-          apiKey: dom.optApiKey.value || null,
-          httpProxy: dom.optHttpProxy.value || null,
-          httpsProxy: dom.optHttpsProxy.value || null,
-          caBundle: dom.optCaBundle.value || null,
-          timeout: dom.optTimeout.value || null,
-          cveId: dom.optCveId.value || null,
-          cweId: dom.optCweId.value || null,
-          cvssV3Severity: dom.optCvssV3Severity.value || null,
-          cvssV4Severity: dom.optCvssV4Severity.value || null,
-          cvssV3Metrics: dom.optCvssV3Metrics.value || null,
-          cvssV4Metrics: dom.optCvssV4Metrics.value || null,
+          noRejected: dom.optNoRejected?.checked,
+          isVulnerable: dom.optIsVulnerable?.checked,
+          hasKev: dom.optHasKev?.checked,
+          insecure: dom.optInsecure?.checked,
+          httpProxy: dom.optHttpProxy?.value || null,
+          httpsProxy: dom.optHttpsProxy?.value || null,
+          caBundle: dom.optCaBundle?.value || null,
+          timeout: dom.optTimeout?.value || null,
         },
       };
-      if (dom.optApiKey.value === '') {
-        payload.options.apiKey = '';
-      }
-      return payload;
     }
 
     async function saveWatchlist() {
       const payload = gatherFormData();
-      const watchId = dom.formId.value;
+      const watchId = dom.formId?.value;
       try {
         let response;
         if (watchId) {
@@ -669,22 +586,14 @@
           response = await api.createWatchlist(payload);
           state.currentWatchId = response.watchlist?.id || null;
         }
-        if (response && response.watchlist) {
+        if (response?.watchlist) {
           const idx = state.lists.findIndex((w) => w.id === response.watchlist.id);
-          if (idx >= 0) {
-            state.lists[idx] = response.watchlist;
-          } else {
-            state.lists.push(response.watchlist);
-          }
+          if (idx >= 0) state.lists[idx] = response.watchlist;
+          else state.lists.push(response.watchlist);
           renderSidebar();
           populateProjectSelect();
           fillForm(response.watchlist);
-          showAlert('Watchlist saved.', 'success', 2000);
-          if (Array.isArray(response.warnings) && response.warnings.length) {
-            dom.formWarnings.textContent = response.warnings.join(' ');
-          } else {
-            dom.formWarnings.textContent = '';
-          }
+          showAlert('Team saved.', 'success', 2000);
         }
       } catch (err) {
         console.error('Save failed', err);
@@ -692,138 +601,204 @@
     }
 
     async function deleteCurrentWatch() {
-      const watchId = dom.formId.value;
-      if (!watchId) {
-        clearForm();
-        return;
-      }
-      if (!confirm('Delete this watchlist?')) {
-        return;
-      }
+      const watchId = dom.formId?.value;
+      if (!watchId) { clearForm(); return; }
+      if (!confirm('Delete this team?')) return;
       try {
         await api.deleteWatchlist(watchId);
         state.lists = state.lists.filter((w) => w.id !== watchId);
         state.currentWatchId = null;
         clearForm();
         renderSidebar();
-        showAlert('Watchlist deleted.', 'success', 2000);
+        showAlert('Team deleted.', 'success', 2000);
       } catch (err) {
         console.error('Delete failed', err);
-      } finally {
-        updateBulkState();
       }
     }
 
     async function runCurrent(window) {
-      if (state.pendingRun) {
-        return;
-      }
-      const watchId = dom.formId.value;
-      if (!watchId) {
-        await saveWatchlist();
-      }
-      const id = dom.formId.value;
+      if (state.pendingRun) return;
+      const watchId = dom.formId?.value;
+      if (!watchId) await saveWatchlist();
+      const id = dom.formId?.value;
       if (!id) {
-        showAlert('Save the watchlist before running.', 'error');
+        showAlert('Save the team before running.', 'error');
         return;
       }
       state.pendingRun = true;
+
+      // Show loading state
+      if (dom.btnSaveAndScan) {
+        dom.btnSaveAndScan.disabled = true;
+        dom.btnSaveAndScan.textContent = 'Scanning...';
+      }
+      showAlert('Scanning vulnerabilities...', 'info', 0);
+
       try {
         const result = await api.runWatchlist(id, window);
         state.originalResults = result.results || [];
         state.windowLabel = result.windowLabel || '';
         applyFilters();
-        showAlert(`Fetched ${state.originalResults.length} CVEs.`, 'success', 2000);
-        dom.windowLabel.textContent = `Window: ${state.windowLabel || '—'}`;
-        displayIssues(result.issues);
-        if (!state.originalResults.length && Array.isArray(result.issues) && result.issues.length) {
-          showAlert('Scan completed with errors. No CVEs were retrieved.', 'error', 10000);
-        }
+
+        // Clear loading alert and show success
+        dom.alerts.innerHTML = '';
+        showAlert(`Found ${state.originalResults.length} vulnerabilities.`, 'success', 3000);
+        if (dom.windowLabel) dom.windowLabel.textContent = `Window: ${state.windowLabel || '-'}`;
       } catch (err) {
         console.error('Run failed', err);
+        dom.alerts.innerHTML = '';
+        showAlert('Scan failed. Please try again.', 'error', 5000);
       } finally {
         state.pendingRun = false;
+        if (dom.btnSaveAndScan) {
+          dom.btnSaveAndScan.disabled = false;
+          dom.btnSaveAndScan.textContent = 'Save & Scan';
+        }
       }
     }
 
-    function applyFilters() {
-      const text = (dom.filterText.value || '').toLowerCase();
-      const severity = dom.filterSeverity.value || '';
-      const minScore = parseFloat(dom.filterScore.value || '');
-      const kevOnly = dom.filterKev.checked;
-      state.filters = { text, severity, minScore: dom.filterScore.value, kevOnly };
-      state.filteredResults = state.originalResults.filter((item) => {
-        const hay = `${item.id || ''} ${item.description || ''} ${(item.matchedCPE || []).join(' ')}`.toLowerCase();
-        if (text && !hay.includes(text)) {
-          return false;
-        }
-        if (severity && (item.cvssSeverity || '') !== severity) {
-          return false;
-        }
-        if (!Number.isNaN(minScore)) {
-          const score = parseFloat(item.cvssScore);
-          if (Number.isNaN(score) || score < minScore) {
-            return false;
+    // CPE List management
+    function renderCpeList() {
+      if (!dom.cpeList) return;
+      if (state.cpeList.length === 0) {
+        dom.cpeList.innerHTML = '<div class="text-xs text-slate-400 italic">No CPEs added yet</div>';
+        return;
+      }
+      dom.cpeList.innerHTML = '';
+      state.cpeList.forEach((cpe, idx) => {
+        const item = document.createElement('div');
+        item.className = 'cpe-list-item';
+        item.innerHTML = `
+          <span class="truncate" title="${escapeHtml(cpe)}">${escapeHtml(cpe)}</span>
+          <button class="cpe-list-item__remove" data-idx="${idx}">&times;</button>
+        `;
+        item.querySelector('button').addEventListener('click', () => {
+          state.cpeList.splice(idx, 1);
+          renderCpeList();
+          updateFormCpes();
+        });
+        dom.cpeList.appendChild(item);
+      });
+    }
+
+    function updateFormCpes() {
+      if (dom.formCpes) dom.formCpes.value = state.cpeList.join(', ');
+    }
+
+    function addCpeToList(cpe) {
+      if (!cpe || state.cpeList.includes(cpe)) return;
+      state.cpeList.push(cpe);
+      renderCpeList();
+      updateFormCpes();
+    }
+
+    // Schedule management
+    function renderScheduleIntervals() {
+      if (!dom.scheduleIntervals) return;
+      dom.scheduleIntervals.innerHTML = '';
+      state.scheduleIntervals.forEach((time, idx) => {
+        const item = document.createElement('div');
+        item.className = 'interval-item';
+        item.innerHTML = `
+          <span class="interval-item__time">${escapeHtml(time)}</span>
+          <span class="text-xs text-slate-500">Daily</span>
+          <div class="interval-item__actions">
+            <button class="interval-item__action interval-item__action--edit" title="Edit">
+              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="interval-item__action interval-item__action--delete" title="Delete" data-idx="${idx}">
+              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </button>
+          </div>
+        `;
+        item.querySelector('.interval-item__action--edit').addEventListener('click', () => {
+          const newTime = prompt('Edit time (HH:MM)', time);
+          if (newTime && /^\d{2}:\d{2}$/.test(newTime)) {
+            state.scheduleIntervals[idx] = newTime;
+            state.scheduleIntervals.sort();
+            settings.scanTimes = state.scheduleIntervals.join(',');
+            saveSettings();
+            renderScheduleIntervals();
+            renderSidebar();
           }
+        });
+        item.querySelector('.interval-item__action--delete').addEventListener('click', () => {
+          state.scheduleIntervals.splice(idx, 1);
+          settings.scanTimes = state.scheduleIntervals.join(',');
+          saveSettings();
+          renderScheduleIntervals();
+          renderSidebar();
+        });
+        dom.scheduleIntervals.appendChild(item);
+      });
+    }
+
+    // Filtering
+    function applyFilters() {
+      const cveFilter = (dom.filterCve?.value || '').toLowerCase();
+      const textFilter = (dom.filterText?.value || '').toLowerCase();
+      const minEpss = parseFloat(dom.filterEpss?.value || '') / 100;
+      const minScore = parseFloat(dom.filterScore?.value || '');
+      const kevFilter = dom.filterKev?.value || '';
+      const showAll = state.filters.showAll;
+      const showMitigated = state.filters.showMitigated;
+      const showNew = state.filters.showNew;
+
+      // Date filtering
+      const dateFilter = state.filters.dateFilter;
+      let dateThreshold = null;
+      if (dateFilter !== 'custom') {
+        const days = parseInt(dateFilter, 10);
+        dateThreshold = new Date();
+        dateThreshold.setHours(0, 0, 0, 0); // Start of today
+        dateThreshold.setDate(dateThreshold.getDate() - days);
+      }
+
+      state.filteredResults = state.originalResults.filter((item) => {
+        // CVE filter
+        if (cveFilter && !(item.id || '').toLowerCase().includes(cveFilter)) return false;
+
+        // Text search
+        const hay = `${item.id || ''} ${item.description || ''} ${(item.matchedCPE || []).join(' ')} ${item.sourceIdentifier || ''}`.toLowerCase();
+        if (textFilter && !hay.includes(textFilter)) return false;
+
+        // EPSS filter
+        if (!isNaN(minEpss) && minEpss > 0) {
+          const epss = parseFloat(item.epss);
+          if (isNaN(epss) || epss < minEpss) return false;
         }
-        if (kevOnly && !item.kev) {
-          return false;
+
+        // CVSS filter
+        if (!isNaN(minScore) && minScore > 0) {
+          const score = parseFloat(item.cvssScore);
+          if (isNaN(score) || score < minScore) return false;
         }
+
+        // KEV filter
+        if (kevFilter === 'yes' && !item.kev) return false;
+        if (kevFilter === 'no' && item.kev) return false;
+
+        // Date filter
+        if (dateThreshold && item.published) {
+          const pubDate = new Date(item.published);
+          if (pubDate < dateThreshold) return false;
+        }
+
+        // Status filters
+        const isMitigated = mitigatedCves.has(item.id);
+        const isNew = item.is_new;
+
+        if (!showAll) {
+          if (showNew && !showMitigated && !isNew) return false;
+          if (showMitigated && !showNew && !isMitigated) return false;
+          if (showNew && showMitigated && !isNew && !isMitigated) return false;
+        }
+
         return true;
       });
-      renderFilterPills();
+
+      state.currentPage = 1;
       sortAndRender();
-    }
-
-    function renderFilterPills() {
-      if (!dom.filterPills) return;
-      dom.filterPills.innerHTML = '';
-      const pills = [];
-      if (state.filters.text) {
-        pills.push({ key: 'text', label: `Search: ${state.filters.text}` });
-      }
-      if (state.filters.severity) {
-        pills.push({ key: 'severity', label: `Severity: ${state.filters.severity}` });
-      }
-      if (state.filters.minScore) {
-        pills.push({ key: 'minScore', label: `Min score: ${state.filters.minScore}` });
-      }
-      if (state.filters.kevOnly) {
-        pills.push({ key: 'kevOnly', label: 'KEV only' });
-      }
-      pills.forEach((pill) => {
-        const el = document.createElement('span');
-        el.className = 'pill';
-        el.textContent = pill.label;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.textContent = '×';
-        btn.addEventListener('click', () => {
-          clearFilter(pill.key);
-        });
-        el.appendChild(btn);
-        dom.filterPills.appendChild(el);
-      });
-    }
-
-    function clearFilter(key) {
-      switch (key) {
-        case 'text':
-          dom.filterText.value = '';
-          break;
-        case 'severity':
-          dom.filterSeverity.value = '';
-          break;
-        case 'minScore':
-          dom.filterScore.value = '';
-          break;
-        case 'kevOnly':
-          dom.filterKev.checked = false;
-          break;
-        default:
-          break;
-      }
-      applyFilters();
     }
 
     function sortAndRender() {
@@ -831,11 +806,12 @@
       const dir = state.sortDir;
       const accessor = {
         id: (item) => item.id || '',
-        sev: (item) => item.cvssSeverity || 'None',
-        score: (item) => parseFloat(item.cvssScore) || -1,
         pub: (item) => item.published || '',
-        mod: (item) => item.lastModified || '',
+        publisher: (item) => item.sourceIdentifier || '',
+        score: (item) => parseFloat(item.cvssScore) || -1,
+        epss: (item) => parseFloat(item.epss) || -1,
       };
+
       state.filteredResults.sort((a, b) => {
         const va = accessor[key](a);
         const vb = accessor[key](b);
@@ -843,53 +819,91 @@
         if (va > vb) return 1 * dir;
         return 0;
       });
+
       renderResults();
+      updateSortIndicators();
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('th.sortable').forEach((th) => {
+        th.classList.remove('asc', 'desc');
+        if (th.dataset.k === state.sortKey) {
+          th.classList.add(state.sortDir > 0 ? 'asc' : 'desc');
+        }
+      });
     }
 
     function renderResults() {
       if (!dom.resBody) return;
       dom.resBody.innerHTML = '';
-      state.filteredResults.forEach((item, idx) => {
+
+      const start = (state.currentPage - 1) * state.pageSize;
+      const end = start + state.pageSize;
+      const pageResults = state.filteredResults.slice(start, end);
+
+      pageResults.forEach((item, idx) => {
+        const globalIdx = start + idx;
+        const isMitigated = mitigatedCves.has(item.id);
         const tr = document.createElement('tr');
-        tr.className = 'border-t hover:bg-slate-50';
+        tr.className = state.detailIndex === globalIdx ? 'selected' : '';
+
+        // Format CVSS with color
+        const score = item.cvssScore;
+        let cvssClass = '';
+        if (score >= 9) cvssClass = 'cvss-critical';
+        else if (score >= 7) cvssClass = 'cvss-high';
+        else if (score >= 4) cvssClass = 'cvss-medium';
+        else cvssClass = 'cvss-low';
+
+        // Format EPSS with color
+        const epss = item.epss;
+        let epssClass = '';
+        let epssDisplay = '-';
+        if (epss !== null && epss !== undefined) {
+          const epssPercent = (epss * 100).toFixed(2);
+          epssDisplay = `${epssPercent}%`;
+          if (epss >= 0.5) epssClass = 'epss-high';
+          else if (epss >= 0.1) epssClass = 'epss-medium';
+          else epssClass = 'epss-low';
+        }
+
+        // KEV icon
+        const kevIcon = item.kev
+          ? '<span class="kev-icon kev-icon--yes" title="CISA KEV">&check;</span>'
+          : '<span class="kev-icon kev-icon--no">&times;</span>';
+
+        // Status badges
+        let badges = '';
+        if (item.is_new) badges += '<span class="new-badge">NEW</span>';
+        if (isMitigated) badges += '<span class="mitigated-badge">MITIGATED</span>';
+
+        // Description (truncated and escaped)
+        const rawDesc = item.description || '';
+        const desc = rawDesc.substring(0, 100) + (rawDesc.length > 100 ? '...' : '');
+
         tr.innerHTML = `
-          <td class="px-4 py-2 text-indigo-700 underline"><button class="link" data-action="detail">${item.id}</button></td>
-          <td class="px-4 py-2">${item.kev ? '✅' : '—'}</td>
-          <td class="px-4 py-2"><span class="badge sev-${item.cvssSeverity || 'None'}">${item.cvssSeverity || 'None'}</span></td>
-          <td class="px-4 py-2">${item.cvssScore ?? ''}</td>
-          <td class="px-4 py-2">${item.published || ''}</td>
-          <td class="px-4 py-2">${item.lastModified || ''}</td>
-          <td class="px-4 py-2 truncate max-w-[14rem]" title="${(item.matchedCPE || []).join(', ')}">${(item.matchedCPE || []).join(', ')}</td>
-          <td class="px-4 py-2 text-sm">
-            <button class="link" data-action="copy">Copy JSON</button>
-            <a class="link" data-action="open" href="https://nvd.nist.gov/vuln/detail/${item.id}" target="_blank">NVD</a>
-          </td>
+          <td class="text-indigo-700 font-medium">${escapeHtml(item.id)}${badges}</td>
+          <td>${kevIcon}</td>
+          <td>${escapeHtml(item.published) || '-'}</td>
+          <td class="text-xs text-slate-500">${escapeHtml(item.sourceIdentifier) || '-'}</td>
+          <td class="description-cell text-xs" title="${escapeHtml(rawDesc)}">${escapeHtml(desc)}</td>
+          <td class="${cvssClass}">${score ?? '-'}</td>
+          <td class="${epssClass}">${epssDisplay}</td>
         `;
-        tr.dataset.index = String(idx);
-        tr.addEventListener('click', (evt) => {
-          if (!(evt.target instanceof HTMLElement)) return;
-          const action = evt.target.dataset.action;
-          if (action === 'copy') {
-            evt.stopPropagation();
-            copyJson(item);
-            return;
-          }
-          if (action === 'open') {
-            return;
-          }
-          showDetails(idx);
-        });
+
+        tr.addEventListener('click', () => showDetails(globalIdx));
         dom.resBody.appendChild(tr);
       });
-      dom.resCount.textContent = String(state.filteredResults.length);
-      if (state.detailIndex >= state.filteredResults.length) {
-        state.detailIndex = -1;
-      }
-      if (state.detailIndex >= 0) {
-        showDetails(state.detailIndex);
-      } else {
-        dom.detailPanel.hidden = true;
-      }
+
+      if (dom.resCount) dom.resCount.textContent = String(state.filteredResults.length);
+      renderPagination();
+    }
+
+    function renderPagination() {
+      const totalPages = Math.ceil(state.filteredResults.length / state.pageSize) || 1;
+      if (dom.pageInfo) dom.pageInfo.textContent = `Page ${state.currentPage} of ${totalPages}`;
+      if (dom.btnPrevPage) dom.btnPrevPage.disabled = state.currentPage <= 1;
+      if (dom.btnNextPage) dom.btnNextPage.disabled = state.currentPage >= totalPages;
     }
 
     function showDetails(index) {
@@ -897,23 +911,86 @@
       if (!item || !dom.detailPanel) return;
       state.detailIndex = index;
       dom.detailPanel.hidden = false;
-      dom.detailCve.textContent = item.id || '';
-      dom.detailMeta.textContent = `Severity: ${item.cvssSeverity || 'None'} • Score: ${item.cvssScore ?? ''} • Modified: ${item.lastModified || ''}`;
-      dom.detailMatched.textContent = (item.matchedCPE || []).length ? `Matched CPE: ${(item.matchedCPE || []).join(', ')}` : '';
-      dom.detailDesc.textContent = item.description || '(no description)';
-      dom.detailCwes.textContent = (item.cwes || []).length ? `CWE: ${(item.cwes || []).join(', ')}` : '';
-      dom.detailRefs.innerHTML = '';
-      (item.references || []).forEach((ref) => {
-        const li = document.createElement('li');
-        const a = document.createElement('a');
-        a.href = ref.url || '#';
-        a.target = '_blank';
-        a.className = 'text-indigo-700 underline';
-        a.textContent = ref.tags && ref.tags.length ? ref.tags.join(', ') : ref.source || ref.url || 'link';
-        li.appendChild(a);
-        dom.detailRefs.appendChild(li);
-      });
-      dom.linkNvd.href = `https://nvd.nist.gov/vuln/detail/${item.id}`;
+
+      const isMitigated = mitigatedCves.has(item.id);
+
+      // Update CVE title
+      if (dom.detailCve) {
+        let title = item.id || '';
+        if (item.kev) title += ' (KEV)';
+        if (item.is_new) title += ' (NEW)';
+        if (isMitigated) title += ' (MITIGATED)';
+        dom.detailCve.textContent = title;
+      }
+
+      // Update metadata
+      if (dom.detailMeta) {
+        const epss = item.epss !== null && item.epss !== undefined ? `${(item.epss * 100).toFixed(2)}%` : 'N/A';
+        const epssPct = item.epss_percentile !== null && item.epss_percentile !== undefined ? `${(item.epss_percentile * 100).toFixed(1)}th` : 'N/A';
+        dom.detailMeta.textContent = `CVSS: ${item.cvssScore ?? 'N/A'} | EPSS: ${epss} (${epssPct} percentile) | Published: ${item.published || 'N/A'} | Publisher: ${item.sourceIdentifier || 'N/A'}`;
+      }
+
+      if (dom.detailMatched) {
+        dom.detailMatched.textContent = (item.matchedCPE || []).length ? `Matched CPE: ${(item.matchedCPE || []).join(', ')}` : '';
+      }
+
+      if (dom.detailDesc) dom.detailDesc.textContent = item.description || '(no description)';
+
+      if (dom.detailCwes) {
+        dom.detailCwes.textContent = (item.cwes || []).length ? `CWE: ${(item.cwes || []).join(', ')}` : '';
+      }
+
+      // KEV details
+      if (dom.detailKev && dom.detailKevDetails) {
+        if (item.kev && item.kev_data) {
+          dom.detailKev.classList.remove('hidden');
+          const kd = item.kev_data;
+          dom.detailKevDetails.innerHTML = `
+            ${kd.dateAdded ? `<div>Added: ${escapeHtml(kd.dateAdded)}</div>` : ''}
+            ${kd.dueDate ? `<div>Due: ${escapeHtml(kd.dueDate)}</div>` : ''}
+            ${kd.requiredAction ? `<div>Action: ${escapeHtml(kd.requiredAction)}</div>` : ''}
+          `;
+        } else {
+          dom.detailKev.classList.add('hidden');
+        }
+      }
+
+      // References
+      if (dom.detailRefs) {
+        dom.detailRefs.innerHTML = '';
+        (item.refs || item.references || []).forEach((ref) => {
+          const li = document.createElement('li');
+          const a = document.createElement('a');
+          a.href = ref.url || '#';
+          a.target = '_blank';
+          a.className = 'text-indigo-700 underline';
+          a.textContent = ref.tags?.length ? ref.tags.join(', ') : ref.source || ref.url || 'link';
+          li.appendChild(a);
+          dom.detailRefs.appendChild(li);
+        });
+      }
+
+      if (dom.linkNvd) dom.linkNvd.href = `https://nvd.nist.gov/vuln/detail/${item.id}`;
+      if (dom.btnMarkMitigated) {
+        dom.btnMarkMitigated.textContent = isMitigated ? 'Unmark Mitigated' : 'Mark Mitigated';
+      }
+
+      // Highlight selected row
+      renderResults();
+    }
+
+    function toggleMitigated() {
+      const item = state.filteredResults[state.detailIndex];
+      if (!item) return;
+      if (mitigatedCves.has(item.id)) {
+        mitigatedCves.delete(item.id);
+        showAlert(`${item.id} unmarked as mitigated`, 'info', 2000);
+      } else {
+        mitigatedCves.add(item.id);
+        showAlert(`${item.id} marked as mitigated`, 'success', 2000);
+      }
+      saveMitigated();
+      showDetails(state.detailIndex);
     }
 
     function copyJson(item) {
@@ -926,21 +1003,19 @@
       });
     }
 
+    // Export functions
     function exportCsv() {
-      const rows = [
-        ['CVE', 'Severity', 'Score', 'Published', 'LastModified', 'MatchedCPE', 'KEV', 'CWEs', 'Description'],
-      ];
+      const rows = [['CVE', 'KEV', 'Published', 'Publisher', 'CVSS', 'EPSS', 'Description', 'Mitigated']];
       state.filteredResults.forEach((item) => {
         rows.push([
           item.id || '',
-          item.cvssSeverity || '',
-          item.cvssScore ?? '',
+          item.kev ? 'yes' : 'no',
           item.published || '',
-          item.lastModified || '',
-          (item.matchedCPE || []).join(';'),
-          item.kev ? 'yes' : '',
-          (item.cwes || []).join(';'),
+          item.sourceIdentifier || '',
+          item.cvssScore ?? '',
+          item.epss !== null ? (item.epss * 100).toFixed(2) + '%' : '',
           (item.description || '').replace(/\n/g, ' '),
+          mitigatedCves.has(item.id) ? 'yes' : 'no',
         ]);
       });
       const body = rows.map((cols) => cols.map(csvEscape).join(',')).join('\n');
@@ -949,9 +1024,7 @@
 
     function csvEscape(value) {
       const text = String(value ?? '');
-      if (/[,\"\n]/.test(text)) {
-        return `"${text.replace(/"/g, '""')}"`;
-      }
+      if (/[,"\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
       return text;
     }
 
@@ -972,142 +1045,33 @@
       URL.revokeObjectURL(url);
     }
 
+    // Bulk selection
     function updateBulkState() {
-      if (!dom.selectAllBox) return;
-      const visibleIds = Array.from(dom.projectsContainer.querySelectorAll('.watchlist-entry')).map((el) => el.dataset.id).filter(Boolean);
-      const selectedVisible = visibleIds.filter((id) => state.selectedIds.has(id));
-      dom.selectAllBox.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
-      dom.selectAllBox.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
-      if (dom.deleteSelectedBtn) {
-        dom.deleteSelectedBtn.disabled = !state.manageMode || state.selectedIds.size === 0;
-      }
+      const count = state.selectedIds.size;
+      if (dom.selectedCount) dom.selectedCount.textContent = `${count} Selected`;
+      if (dom.deleteSelectedBtn) dom.deleteSelectedBtn.disabled = count === 0;
     }
 
     function toggleSelectMode(on) {
       state.manageMode = on;
-      dom.selectModeBtn.textContent = on ? 'Done' : 'Select';
-      dom.selectAllBox.disabled = !on;
-      if (dom.deleteSelectedBtn) {
-        dom.deleteSelectedBtn.classList.toggle('hidden', !on);
-      }
+      if (dom.selectModeBtn) dom.selectModeBtn.textContent = on ? 'Done' : 'Select';
+      if (dom.selectAllBox) dom.selectAllBox.disabled = !on;
+      if (dom.deleteSelectedBtn) dom.deleteSelectedBtn.classList.toggle('hidden', !on);
       if (!on) {
         state.selectedIds.clear();
-        dom.selectAllBox.checked = false;
-        dom.selectAllBox.indeterminate = false;
+        if (dom.selectAllBox) dom.selectAllBox.checked = false;
       }
       renderSidebar();
-      updateBulkState();
     }
 
-    async function bulkDelete() {
-      if (!state.selectedIds.size) return;
-      if (!confirm(`Delete ${state.selectedIds.size} watchlist(s)?`)) {
-        return;
-      }
-      try {
-        const ids = Array.from(state.selectedIds);
-        for (const id of ids) {
-          await api.deleteWatchlist(id);
-          state.lists = state.lists.filter((w) => w.id !== id);
-          if (state.currentWatchId === id) {
-            state.currentWatchId = null;
-          }
-        }
-        state.selectedIds.clear();
-        renderSidebar();
-        showAlert('Watchlists deleted.', 'success', 2000);
-      } catch (err) {
-        console.error('Bulk delete failed', err);
-      } finally {
-        updateBulkState();
-      }
-    }
-
-    async function handleProjectAction(id, action) {
-      switch (action) {
-        case 'rename': {
-          const current = state.projects.find((p) => p.id === id);
-          const name = prompt('Project name', current ? current.name : '');
-          if (!name) return;
-          await api.renameProject(id, name);
-          await api.getWatchlists();
-          break;
-        }
-        case 'delete': {
-          if (!confirm('Delete project? Projects must be empty.')) return;
-          await api.deleteProject(id);
-          await api.getWatchlists();
-          break;
-        }
-        case 'import': {
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.accept = 'application/json';
-          input.addEventListener('change', async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            try {
-              const text = await file.text();
-              const data = JSON.parse(text);
-              const resp = await api.importProject(id, data);
-              state.projects = resp.projects || state.projects;
-              state.lists = resp.lists || state.lists;
-              renderSidebar();
-              if (Array.isArray(resp.warnings) && resp.warnings.length) {
-                showAlert(resp.warnings.join(' '), 'info', 6000);
-              }
-            } catch (err) {
-              showAlert('Import failed', 'error');
-              console.error(err);
-            }
-          });
-          input.click();
-          break;
-        }
-        default:
-          break;
-      }
-    }
-
-    function initBuilder() {
-      updateBuilderOutput();
-      builderFields.forEach((field) => {
-        field?.addEventListener('input', () => {
-          updateBuilderOutput();
-          scheduleSuggestions();
-        });
-      });
-      dom.builderToggle?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        if (!dom.builderBody) return;
-        dom.builderBody.classList.toggle('hidden');
-        dom.builderToggle.textContent = dom.builderBody.classList.contains('hidden') ? 'Show' : 'Hide';
-      });
-      dom.builderOutput.textContent = buildCpe();
-      const buildBtn = document.getElementById('b_build');
-      const addBtn = document.getElementById('b_add');
-      buildBtn?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        updateBuilderOutput();
-      });
-      addBtn?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        updateBuilderOutput();
-        if (!dom.builderOutput || !dom.formCpes) return;
-        const value = dom.builderOutput.textContent.trim();
-        if (!value) return;
-        const existing = dom.formCpes.value.trim();
-        dom.formCpes.value = existing ? `${existing.replace(/\s*$/, '')}, ${value}` : value;
-      });
-    }
-
+    // CPE Builder
     function escapeSegment(value) {
       if (!value) return '*';
       return value.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
     }
 
     function buildCpe() {
-      const values = builderFields.map((field, idx) => {
+      const values = builderFields.map((field) => {
         if (!field) return '*';
         const raw = 'value' in field ? field.value : '';
         return escapeSegment(raw.trim());
@@ -1117,257 +1081,311 @@
     }
 
     function updateBuilderOutput() {
-      if (!dom.builderOutput) return;
-      dom.builderOutput.textContent = buildCpe();
+      if (dom.builderOutput) dom.builderOutput.textContent = buildCpe();
     }
 
-    let suggestTimer = null;
-    function scheduleSuggestions() {
-      clearTimeout(suggestTimer);
-      suggestTimer = setTimeout(fetchSuggestions, 400);
+    // Settings modal
+    function openSettingsModal() {
+      if (dom.settingScanTimes) dom.settingScanTimes.value = settings.scanTimes;
+      if (dom.settingCvssThreshold) dom.settingCvssThreshold.value = settings.cvssThreshold || '';
+      if (dom.settingEpssThreshold) dom.settingEpssThreshold.value = settings.epssThreshold || '';
+      if (dom.settingAutoRefresh) dom.settingAutoRefresh.checked = settings.autoRefresh;
+      dom.settingsModal?.classList.remove('hidden');
     }
 
-    async function fetchSuggestions() {
-      const payload = {
-        part: document.getElementById('b_part')?.value || '*',
-        vendor: document.getElementById('b_vendor')?.value || '',
-        product: document.getElementById('b_product')?.value || '',
-        version: document.getElementById('b_version')?.value || '',
-        limit: 50,
-      };
-      if (!payload.vendor && !payload.product && !payload.version) {
-        dom.builderSuggestions?.classList.add('hidden');
-        dom.builderSuggestions.innerHTML = '';
-        return;
+    function closeSettingsModal() {
+      dom.settingsModal?.classList.add('hidden');
+    }
+
+    function saveSettingsFromModal() {
+      settings.scanTimes = dom.settingScanTimes?.value || '07:30,12:30,16:00,19:30';
+      settings.cvssThreshold = parseFloat(dom.settingCvssThreshold?.value) || 0;
+      settings.epssThreshold = parseFloat(dom.settingEpssThreshold?.value) || 0;
+      settings.autoRefresh = dom.settingAutoRefresh?.checked || false;
+      state.scheduleIntervals = settings.scanTimes.split(',').filter(Boolean);
+      saveSettings();
+      renderScheduleIntervals();
+      renderSidebar();
+      closeSettingsModal();
+      showAlert('Settings saved.', 'success', 2000);
+    }
+
+    // Interval modal
+    function openIntervalModal() {
+      dom.intervalModal?.classList.remove('hidden');
+    }
+
+    function closeIntervalModal() {
+      dom.intervalModal?.classList.add('hidden');
+    }
+
+    function addIntervalFromModal() {
+      const time = dom.intervalTime?.value || '12:00';
+      if (!state.scheduleIntervals.includes(time)) {
+        state.scheduleIntervals.push(time);
+        state.scheduleIntervals.sort();
+        settings.scanTimes = state.scheduleIntervals.join(',');
+        saveSettings();
+        renderScheduleIntervals();
+        renderSidebar();
       }
-      try {
-        const data = await api.suggestCpe(payload);
-        const items = data.items || [];
-        if (!items.length) {
-          dom.builderSuggestions?.classList.add('hidden');
-          dom.builderSuggestions.innerHTML = '';
-          return;
-        }
-        const list = document.createElement('ul');
-        list.className = 'space-y-1';
-        items.slice(0, 20).forEach((item) => {
-          const li = document.createElement('li');
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'suggestion';
-          btn.textContent = item.cpeName;
-          btn.addEventListener('click', () => {
-            dom.formCpes.value = dom.formCpes.value ? `${dom.formCpes.value.replace(/\s*$/, '')}, ${item.cpeName}` : item.cpeName;
-          });
-          li.appendChild(btn);
-          list.appendChild(li);
-        });
-        dom.builderSuggestions.innerHTML = '';
-        dom.builderSuggestions.appendChild(list);
-        dom.builderSuggestions.classList.remove('hidden');
-      } catch (err) {
-        console.error('Suggestion fetch failed', err);
-      }
+      closeIntervalModal();
     }
 
+    // Event bindings
     function initEvents() {
+      // Sidebar
       dom.searchInput?.addEventListener('input', () => {
         const query = (dom.searchInput.value || '').toLowerCase();
-        dom.projectsContainer.querySelectorAll('.watchlist-entry').forEach((entry) => {
-          const watch = findWatchlist(entry.dataset.id);
-          if (!watch) return;
-          const hay = `${watch.name} ${watch.cpes.join(' ')}`.toLowerCase();
-          entry.classList.toggle('hidden', Boolean(query) && !hay.includes(query));
+        dom.projectsContainer?.querySelectorAll('.team-card').forEach((card) => {
+          const text = card.textContent.toLowerCase();
+          card.style.display = query && !text.includes(query) ? 'none' : '';
         });
       });
 
-      dom.selectModeBtn?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        toggleSelectMode(!state.manageMode);
-      });
+      dom.selectModeBtn?.addEventListener('click', () => toggleSelectMode(!state.manageMode));
 
       dom.selectAllBox?.addEventListener('change', () => {
-        const check = dom.selectAllBox.checked;
-        state.selectedIds.clear();
-        dom.projectsContainer.querySelectorAll('.watchlist-entry').forEach((entry) => {
-          if (!entry.classList.contains('hidden')) {
-            const id = entry.dataset.id;
-            if (!id) return;
-            const box = entry.querySelector('.wlbox');
-            if (box instanceof HTMLInputElement) {
-              box.checked = check;
-            }
-            if (check) {
-              state.selectedIds.add(id);
-            }
-          }
+        state.projects.forEach((p) => {
+          if (dom.selectAllBox.checked) state.selectedIds.add(p.id);
+          else state.selectedIds.delete(p.id);
         });
-        updateBulkState();
-      });
-
-      dom.newWatchBtn?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        state.currentWatchId = null;
-        clearForm();
         renderSidebar();
       });
 
-      dom.newProjectBtn?.addEventListener('click', async (evt) => {
-        evt.preventDefault();
-        const name = prompt('Project name', 'New Project');
+      dom.newWatchBtn?.addEventListener('click', () => {
+        state.currentWatchId = null;
+        clearForm();
+        dom.form?.classList.remove('hidden');
+        renderSidebar();
+      });
+
+      dom.newProjectBtn?.addEventListener('click', async () => {
+        const name = prompt('Team name', 'New Team');
         if (!name) return;
         await api.createProject(name);
         await api.getWatchlists();
       });
 
-      dom.collapseAllBtn?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        state.projects.forEach((p) => state.collapsed.add(p.id));
-        saveCollapsed();
-        renderSidebar();
+      dom.deleteSelectedBtn?.addEventListener('click', async () => {
+        if (!state.selectedIds.size) return;
+        if (!confirm(`Delete ${state.selectedIds.size} team(s)?`)) return;
+        for (const id of state.selectedIds) {
+          try { await api.deleteProject(id); } catch (e) { /* ignore */ }
+        }
+        state.selectedIds.clear();
+        await api.getWatchlists();
+        showAlert('Teams deleted.', 'success', 2000);
       });
 
-      dom.expandAllBtn?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        state.collapsed.clear();
-        saveCollapsed();
-        renderSidebar();
+      // CPE Builder
+      builderFields.forEach((field) => {
+        field?.addEventListener('input', updateBuilderOutput);
       });
 
-      dom.btnRun24?.addEventListener('click', () => runCurrent('24h'));
-      dom.btnRun90?.addEventListener('click', () => runCurrent('90d'));
-      dom.btnRun120?.addEventListener('click', () => runCurrent('120d'));
-      dom.btnSaveOnly?.addEventListener('click', () => {
-        saveWatchlist();
-      });
-      dom.btnDeleteWatch?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        deleteCurrentWatch();
+      dom.builderToggle?.addEventListener('click', () => {
+        dom.builderBody?.classList.toggle('hidden');
+        dom.builderToggle.textContent = dom.builderBody?.classList.contains('hidden') ? 'Show' : 'Hide';
       });
 
-      dom.deleteSelectedBtn?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        bulkDelete();
+      dom.btnAddCpe?.addEventListener('click', () => {
+        const cpe = buildCpe();
+        if (cpe && cpe !== 'cpe:2.3:o:*:*:*:*:*:*:*:*:*:*') addCpeToList(cpe);
       });
 
+      dom.btnAddManualCpe?.addEventListener('click', () => {
+        const cpe = dom.manualCpeInput?.value?.trim();
+        if (cpe) {
+          addCpeToList(cpe);
+          dom.manualCpeInput.value = '';
+        }
+      });
+
+      // Schedule
+      document.querySelectorAll('.scan-period-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.scan-period-btn').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          state.scanPeriod = btn.dataset.period;
+        });
+      });
+
+      dom.btnAddInterval?.addEventListener('click', openIntervalModal);
+      dom.btnCloseInterval?.addEventListener('click', closeIntervalModal);
+      dom.btnCancelInterval?.addEventListener('click', closeIntervalModal);
+      dom.btnConfirmInterval?.addEventListener('click', addIntervalFromModal);
+
+      dom.btnSaveAndScan?.addEventListener('click', async () => {
+        await saveWatchlist();
+        const period = state.scanPeriod === 'custom' ? '24h' : state.scanPeriod;
+        await runCurrent(period);
+      });
+
+      // Form
+      dom.btnSaveWatch?.addEventListener('click', saveWatchlist);
+      dom.btnDeleteWatch?.addEventListener('click', deleteCurrentWatch);
+
+      // Filters
+      dom.btnFilter?.addEventListener('click', applyFilters);
+      dom.filterCve?.addEventListener('keypress', (e) => { if (e.key === 'Enter') applyFilters(); });
       dom.filterText?.addEventListener('input', applyFilters);
-      dom.filterSeverity?.addEventListener('change', applyFilters);
+      dom.filterEpss?.addEventListener('input', applyFilters);
       dom.filterScore?.addEventListener('input', applyFilters);
       dom.filterKev?.addEventListener('change', applyFilters);
-      dom.filterClear?.addEventListener('click', (evt) => {
-        evt.preventDefault();
-        dom.filterText.value = '';
-        dom.filterSeverity.value = '';
-        dom.filterScore.value = '';
-        dom.filterKev.checked = false;
+
+      dom.filterClear?.addEventListener('click', () => {
+        if (dom.filterCve) dom.filterCve.value = '';
+        if (dom.filterText) dom.filterText.value = '';
+        if (dom.filterEpss) dom.filterEpss.value = '';
+        if (dom.filterScore) dom.filterScore.value = '';
+        if (dom.filterKev) dom.filterKev.value = '';
+        if (dom.filterAll) dom.filterAll.checked = false;
+        if (dom.filterMitigated) dom.filterMitigated.checked = false;
+        if (dom.filterNew) dom.filterNew.checked = true;
+        state.filters.showAll = false;
+        state.filters.showMitigated = false;
+        state.filters.showNew = true;
+        state.filters.dateFilter = 'custom';
+        document.querySelectorAll('.date-filter-btn').forEach((b) => b.classList.remove('active'));
+        document.querySelector('.date-filter-btn[data-days="custom"]')?.classList.add('active');
         applyFilters();
       });
 
+      // Status filters
+      dom.filterAll?.addEventListener('change', () => {
+        state.filters.showAll = dom.filterAll.checked;
+        if (dom.filterAll.checked) {
+          if (dom.filterMitigated) dom.filterMitigated.checked = false;
+          if (dom.filterNew) dom.filterNew.checked = false;
+          state.filters.showMitigated = false;
+          state.filters.showNew = false;
+        }
+        applyFilters();
+      });
+
+      dom.filterMitigated?.addEventListener('change', () => {
+        state.filters.showMitigated = dom.filterMitigated.checked;
+        if (dom.filterMitigated.checked && dom.filterAll) {
+          dom.filterAll.checked = false;
+          state.filters.showAll = false;
+        }
+        applyFilters();
+      });
+
+      dom.filterNew?.addEventListener('change', () => {
+        state.filters.showNew = dom.filterNew.checked;
+        if (dom.filterNew.checked && dom.filterAll) {
+          dom.filterAll.checked = false;
+          state.filters.showAll = false;
+        }
+        applyFilters();
+      });
+
+      // Date filter buttons
+      document.querySelectorAll('.date-filter-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.date-filter-btn').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          state.filters.dateFilter = btn.dataset.days;
+          applyFilters();
+        });
+      });
+
+      // Sorting
       document.querySelectorAll('th.sortable').forEach((th) => {
         th.addEventListener('click', () => {
           const key = th.dataset.k;
           if (!key) return;
-          if (state.sortKey === key) {
-            state.sortDir = -state.sortDir;
-          } else {
+          if (state.sortKey === key) state.sortDir = -state.sortDir;
+          else {
             state.sortKey = key;
-            state.sortDir = key === 'score' || key === 'mod' || key === 'pub' ? -1 : 1;
+            state.sortDir = (key === 'score' || key === 'epss' || key === 'pub') ? -1 : 1;
           }
           sortAndRender();
         });
       });
 
-      dom.btnPrev?.addEventListener('click', () => {
-        if (state.detailIndex > 0) {
-          showDetails(state.detailIndex - 1);
-        }
-      });
-      dom.btnNext?.addEventListener('click', () => {
-        if (state.detailIndex >= 0 && state.detailIndex < state.filteredResults.length - 1) {
-          showDetails(state.detailIndex + 1);
-        }
-      });
-      dom.btnCopyJson?.addEventListener('click', () => {
-        if (state.detailIndex >= 0) {
-          copyJson(state.filteredResults[state.detailIndex]);
+      // Pagination
+      dom.btnPrevPage?.addEventListener('click', () => {
+        if (state.currentPage > 1) {
+          state.currentPage--;
+          renderResults();
         }
       });
 
+      dom.btnNextPage?.addEventListener('click', () => {
+        const totalPages = Math.ceil(state.filteredResults.length / state.pageSize);
+        if (state.currentPage < totalPages) {
+          state.currentPage++;
+          renderResults();
+        }
+      });
+
+      // Detail panel
+      dom.btnPrev?.addEventListener('click', () => {
+        if (state.detailIndex > 0) showDetails(state.detailIndex - 1);
+      });
+
+      dom.btnNext?.addEventListener('click', () => {
+        if (state.detailIndex < state.filteredResults.length - 1) showDetails(state.detailIndex + 1);
+      });
+
+      dom.btnCopyJson?.addEventListener('click', () => {
+        if (state.detailIndex >= 0) copyJson(state.filteredResults[state.detailIndex]);
+      });
+
+      dom.btnMarkMitigated?.addEventListener('click', toggleMitigated);
+
+      // Exports
       dom.btnExportCsv?.addEventListener('click', exportCsv);
       dom.btnExportNdjson?.addEventListener('click', exportNdjson);
 
-      window.addEventListener('keydown', (evt) => {
-        if (evt.target && (evt.target.tagName === 'INPUT' || evt.target.tagName === 'TEXTAREA')) {
-          return;
-        }
-        if (evt.key === 'Delete') {
-          if (state.manageMode && state.selectedIds.size) {
-            evt.preventDefault();
-            bulkDelete();
-          }
-        } else if (evt.key.toLowerCase() === 'a') {
-          evt.preventDefault();
-          toggleSelectMode(true);
-          dom.selectAllBox.checked = true;
-          dom.selectAllBox.dispatchEvent(new Event('change'));
-        } else if (evt.key.toLowerCase() === 'n') {
-          evt.preventDefault();
-          state.currentWatchId = null;
-          clearForm();
-          renderSidebar();
-        } else if (evt.key.toLowerCase() === 'p') {
-          evt.preventDefault();
-          dom.newProjectBtn.click();
-        } else if (evt.key === 'ArrowLeft' && state.detailIndex > 0) {
+      // Settings modal
+      dom.btnSettings?.addEventListener('click', openSettingsModal);
+      dom.btnCloseSettings?.addEventListener('click', closeSettingsModal);
+      dom.btnCancelSettings?.addEventListener('click', closeSettingsModal);
+      dom.btnSaveSettings?.addEventListener('click', saveSettingsFromModal);
+      dom.settingsModal?.querySelector('.modal__backdrop')?.addEventListener('click', closeSettingsModal);
+
+      // Interval modal backdrop
+      dom.intervalModal?.querySelector('.modal__backdrop')?.addEventListener('click', closeIntervalModal);
+
+      // Keyboard shortcuts
+      window.addEventListener('keydown', (e) => {
+        if (e.target?.tagName === 'INPUT' || e.target?.tagName === 'TEXTAREA') return;
+
+        if (e.key === 'ArrowLeft' && state.detailIndex > 0) {
           showDetails(state.detailIndex - 1);
-        } else if (evt.key === 'ArrowRight' && state.detailIndex >= 0 && state.detailIndex < state.filteredResults.length - 1) {
+        } else if (e.key === 'ArrowRight' && state.detailIndex < state.filteredResults.length - 1) {
           showDetails(state.detailIndex + 1);
+        } else if (e.key === 'Escape') {
+          closeSettingsModal();
+          closeIntervalModal();
         }
       });
-
-      dom.optIsVulnerable?.addEventListener('change', checkFormWarnings);
-      dom.formCpes?.addEventListener('input', checkFormWarnings);
-      dom.optApiKey?.addEventListener('input', () => {
-        if (dom.optApiKey.value === '') {
-          dom.apiKeyHint.textContent = 'API key cleared on save.';
-        }
-      });
-    }
-
-    function checkFormWarnings() {
-      const isVuln = dom.optIsVulnerable.checked;
-      if (!isVuln) {
-        dom.formWarnings.textContent = '';
-        return;
-      }
-      const cpes = dom.formCpes.value.split(',').map((s) => s.trim()).filter(Boolean);
-      const warning = cpes.some((cpe) => /:\*(:|$)/.test(cpe))
-        ? 'Warning: isVulnerable requires specific versions. Wildcards may cause 400 responses.'
-        : '';
-      dom.formWarnings.textContent = warning;
     }
 
     function init() {
       renderSidebar();
       populateProjectSelect();
-      initBuilder();
+      renderCpeList();
+      renderScheduleIntervals();
+      updateBuilderOutput();
       initEvents();
+
       if (state.currentWatchId) {
         const watch = findWatchlist(state.currentWatchId);
-        if (watch) {
-          fillForm(watch);
-        } else {
-          clearForm();
-        }
+        if (watch) fillForm(watch);
+        else clearForm();
       } else {
         clearForm();
       }
-      state.originalResults = state.originalResults || [];
+
       applyFilters();
-      if (state.windowLabel) {
+
+      if (state.windowLabel && dom.windowLabel) {
         dom.windowLabel.textContent = `Window: ${state.windowLabel}`;
       }
-      displayIssues(state.initialIssues);
     }
 
     return { init };
