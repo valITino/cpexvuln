@@ -80,7 +80,7 @@
               <div id="builderBody">
                 <div class="builder-grid">
                   <div>
-                    <label class="filter-label">Part <span class="text-red-500">*</span></label>
+                    <label for="b_part" class="filter-label">Part <span class="text-red-500">*</span></label>
                     <select id="b_part" class="filter-input">
                       <option value="a">a (application)</option>
                       <option value="o" selected>o (operating system)</option>
@@ -88,43 +88,43 @@
                     </select>
                   </div>
                   <div>
-                    <label class="filter-label">Vendor <span class="text-red-500">*</span></label>
+                    <label for="b_vendor" class="filter-label">Vendor <span class="text-red-500">*</span></label>
                     <input id="b_vendor" class="filter-input" placeholder="microsoft" />
                   </div>
                   <div>
-                    <label class="filter-label">Product <span class="text-red-500">*</span></label>
+                    <label for="b_product" class="filter-label">Product <span class="text-red-500">*</span></label>
                     <input id="b_product" class="filter-input" placeholder="windows_11" />
                   </div>
                   <div>
-                    <label class="filter-label">Version <span class="text-red-500">*</span></label>
+                    <label for="b_version" class="filter-label">Version <span class="text-red-500">*</span></label>
                     <input id="b_version" class="filter-input" placeholder="23h2" />
                   </div>
                   <div>
-                    <label class="filter-label">Update</label>
+                    <label for="b_update" class="filter-label">Update</label>
                     <input id="b_update" class="filter-input" placeholder="*" />
                   </div>
                   <div>
-                    <label class="filter-label">Edition <span class="text-slate-400 text-xs">(deprecated)</span></label>
+                    <label for="b_edition" class="filter-label">Edition <span class="text-slate-400 text-xs">(deprecated)</span></label>
                     <input id="b_edition" class="filter-input" placeholder="*" />
                   </div>
                   <div>
-                    <label class="filter-label">Language</label>
+                    <label for="b_language" class="filter-label">Language</label>
                     <input id="b_language" class="filter-input" placeholder="*" />
                   </div>
                   <div>
-                    <label class="filter-label">Sw. Ed.</label>
+                    <label for="b_sw" class="filter-label">Sw. Ed.</label>
                     <input id="b_sw" class="filter-input" placeholder="*" />
                   </div>
                   <div>
-                    <label class="filter-label">Target Sw.</label>
+                    <label for="b_tsw" class="filter-label">Target Sw.</label>
                     <input id="b_tsw" class="filter-input" placeholder="*" />
                   </div>
                   <div>
-                    <label class="filter-label">Target Hw.</label>
+                    <label for="b_thw" class="filter-label">Target Hw.</label>
                     <input id="b_thw" class="filter-input" placeholder="*" />
                   </div>
                   <div>
-                    <label class="filter-label">Other</label>
+                    <label for="b_other" class="filter-label">Other</label>
                     <input id="b_other" class="filter-input" placeholder="*" />
                   </div>
                 </div>
@@ -252,26 +252,26 @@
             <div id="filtersBox" class="card">
               <div class="flex flex-wrap gap-3 items-end">
                 <div>
-                  <label class="filter-label">CVE</label>
+                  <label for="f_cve" class="filter-label">CVE</label>
                   <input id="f_cve" class="filter-input w-32" placeholder="CVE-2025-..." />
                 </div>
                 <div>
-                  <label class="filter-label">EPSS</label>
+                  <label for="f_epss" class="filter-label">EPSS</label>
                   <div class="flex items-center gap-1">
                     <span class="text-xs text-slate-500">&gt;</span>
-                    <input id="f_epss" type="number" min="0" max="100" step="1" class="filter-input w-20" placeholder="0" />
+                    <input id="f_epss" type="number" min="0" max="100" step="1" class="filter-input w-20" placeholder="0" aria-label="EPSS threshold percentage" />
                     <span class="text-xs text-slate-500">%</span>
                   </div>
                 </div>
                 <div>
-                  <label class="filter-label">CVSS</label>
+                  <label for="f_score" class="filter-label">CVSS</label>
                   <div class="flex items-center gap-1">
                     <span class="text-xs text-slate-500">&gt;</span>
-                    <input id="f_score" type="number" min="0" max="10" step="0.1" class="filter-input w-20" placeholder="0" />
+                    <input id="f_score" type="number" min="0" max="10" step="0.1" class="filter-input w-20" placeholder="0" aria-label="CVSS threshold score" />
                   </div>
                 </div>
                 <div>
-                  <label class="filter-label">KEV</label>
+                  <label for="f_kev" class="filter-label">KEV</label>
                   <select id="f_kev" class="filter-input">
                     <option value="">All</option>
                     <option value="yes">KEV only</option>

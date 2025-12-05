@@ -268,6 +268,13 @@
     }
 
     // Utility functions
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
     function showAlert(message, level = 'info', timeout = 5000) {
       if (!dom.alerts) return;
       const box = document.createElement('div');
@@ -315,6 +322,29 @@
     function renderSidebar() {
       if (!dom.projectsContainer) return;
       dom.projectsContainer.innerHTML = '';
+
+      // Empty state
+      if (state.projects.length === 0) {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'text-center py-8 px-4';
+        emptyState.innerHTML = `
+          <svg viewBox="0 0 24 24" class="h-12 w-12 mx-auto text-slate-300 mb-3" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M12 8v4m0 4h.01"/>
+          </svg>
+          <p class="text-slate-500 text-sm mb-2">No teams yet</p>
+          <p class="text-slate-400 text-xs mb-4">Create a team to start monitoring vulnerabilities</p>
+          <button id="emptyStateNewTeam" class="btn btn--primary">Create First Team</button>
+        `;
+        dom.projectsContainer.appendChild(emptyState);
+        emptyState.querySelector('#emptyStateNewTeam')?.addEventListener('click', async () => {
+          const name = prompt('Team name', 'My First Team');
+          if (!name) return;
+          await api.createProject(name);
+          await api.getWatchlists();
+        });
+        return;
+      }
 
       state.projects.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((project) => {
         const wrapper = document.createElement('section');
@@ -405,8 +435,9 @@
               if (idx < 3) { // Show max 3 CPEs
                 const cpeEl = document.createElement('div');
                 cpeEl.className = 'cpe-item';
+                const cpeShort = (cpe || '').replace('cpe:2.3:', '');
                 cpeEl.innerHTML = `
-                  <span class="cpe-item__name" title="${cpe}">${cpe.replace('cpe:2.3:', '')}</span>
+                  <span class="cpe-item__name" title="${escapeHtml(cpe)}">${escapeHtml(cpeShort)}</span>
                   <span class="cpe-item__status cpe-item__status--ok"></span>
                 `;
                 cpeEl.addEventListener('click', () => selectWatchlist(watch.id, false));
@@ -595,18 +626,34 @@
         return;
       }
       state.pendingRun = true;
-      showAlert('Scanning...', 'info', 2000);
+
+      // Show loading state
+      if (dom.btnSaveAndScan) {
+        dom.btnSaveAndScan.disabled = true;
+        dom.btnSaveAndScan.textContent = 'Scanning...';
+      }
+      showAlert('Scanning vulnerabilities...', 'info', 0);
+
       try {
         const result = await api.runWatchlist(id, window);
         state.originalResults = result.results || [];
         state.windowLabel = result.windowLabel || '';
         applyFilters();
-        showAlert(`Fetched ${state.originalResults.length} CVEs.`, 'success', 2000);
+
+        // Clear loading alert and show success
+        dom.alerts.innerHTML = '';
+        showAlert(`Found ${state.originalResults.length} vulnerabilities.`, 'success', 3000);
         if (dom.windowLabel) dom.windowLabel.textContent = `Window: ${state.windowLabel || '-'}`;
       } catch (err) {
         console.error('Run failed', err);
+        dom.alerts.innerHTML = '';
+        showAlert('Scan failed. Please try again.', 'error', 5000);
       } finally {
         state.pendingRun = false;
+        if (dom.btnSaveAndScan) {
+          dom.btnSaveAndScan.disabled = false;
+          dom.btnSaveAndScan.textContent = 'Save & Scan';
+        }
       }
     }
 
@@ -622,7 +669,7 @@
         const item = document.createElement('div');
         item.className = 'cpe-list-item';
         item.innerHTML = `
-          <span class="truncate" title="${cpe}">${cpe}</span>
+          <span class="truncate" title="${escapeHtml(cpe)}">${escapeHtml(cpe)}</span>
           <button class="cpe-list-item__remove" data-idx="${idx}">&times;</button>
         `;
         item.querySelector('button').addEventListener('click', () => {
@@ -653,10 +700,10 @@
         const item = document.createElement('div');
         item.className = 'interval-item';
         item.innerHTML = `
-          <span class="interval-item__time">${time}</span>
+          <span class="interval-item__time">${escapeHtml(time)}</span>
           <span class="text-xs text-slate-500">Daily</span>
           <div class="interval-item__actions">
-            <button class="interval-item__action" title="Edit">
+            <button class="interval-item__action interval-item__action--edit" title="Edit">
               <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </button>
             <button class="interval-item__action interval-item__action--delete" title="Delete" data-idx="${idx}">
@@ -664,9 +711,23 @@
             </button>
           </div>
         `;
+        item.querySelector('.interval-item__action--edit').addEventListener('click', () => {
+          const newTime = prompt('Edit time (HH:MM)', time);
+          if (newTime && /^\d{2}:\d{2}$/.test(newTime)) {
+            state.scheduleIntervals[idx] = newTime;
+            state.scheduleIntervals.sort();
+            settings.scanTimes = state.scheduleIntervals.join(',');
+            saveSettings();
+            renderScheduleIntervals();
+            renderSidebar();
+          }
+        });
         item.querySelector('.interval-item__action--delete').addEventListener('click', () => {
           state.scheduleIntervals.splice(idx, 1);
+          settings.scanTimes = state.scheduleIntervals.join(',');
+          saveSettings();
           renderScheduleIntervals();
+          renderSidebar();
         });
         dom.scheduleIntervals.appendChild(item);
       });
@@ -689,6 +750,7 @@
       if (dateFilter !== 'custom') {
         const days = parseInt(dateFilter, 10);
         dateThreshold = new Date();
+        dateThreshold.setHours(0, 0, 0, 0); // Start of today
         dateThreshold.setDate(dateThreshold.getDate() - days);
       }
 
@@ -815,15 +877,16 @@
         if (item.is_new) badges += '<span class="new-badge">NEW</span>';
         if (isMitigated) badges += '<span class="mitigated-badge">MITIGATED</span>';
 
-        // Description (truncated)
-        const desc = (item.description || '').substring(0, 100) + (item.description?.length > 100 ? '...' : '');
+        // Description (truncated and escaped)
+        const rawDesc = item.description || '';
+        const desc = rawDesc.substring(0, 100) + (rawDesc.length > 100 ? '...' : '');
 
         tr.innerHTML = `
-          <td class="text-indigo-700 font-medium">${item.id}${badges}</td>
+          <td class="text-indigo-700 font-medium">${escapeHtml(item.id)}${badges}</td>
           <td>${kevIcon}</td>
-          <td>${item.published || '-'}</td>
-          <td class="text-xs text-slate-500">${item.sourceIdentifier || '-'}</td>
-          <td class="description-cell text-xs" title="${item.description || ''}">${desc}</td>
+          <td>${escapeHtml(item.published) || '-'}</td>
+          <td class="text-xs text-slate-500">${escapeHtml(item.sourceIdentifier) || '-'}</td>
+          <td class="description-cell text-xs" title="${escapeHtml(rawDesc)}">${escapeHtml(desc)}</td>
           <td class="${cvssClass}">${score ?? '-'}</td>
           <td class="${epssClass}">${epssDisplay}</td>
         `;
@@ -883,9 +946,9 @@
           dom.detailKev.classList.remove('hidden');
           const kd = item.kev_data;
           dom.detailKevDetails.innerHTML = `
-            ${kd.dateAdded ? `<div>Added: ${kd.dateAdded}</div>` : ''}
-            ${kd.dueDate ? `<div>Due: ${kd.dueDate}</div>` : ''}
-            ${kd.requiredAction ? `<div>Action: ${kd.requiredAction}</div>` : ''}
+            ${kd.dateAdded ? `<div>Added: ${escapeHtml(kd.dateAdded)}</div>` : ''}
+            ${kd.dueDate ? `<div>Due: ${escapeHtml(kd.dueDate)}</div>` : ''}
+            ${kd.requiredAction ? `<div>Action: ${escapeHtml(kd.requiredAction)}</div>` : ''}
           `;
         } else {
           dom.detailKev.classList.add('hidden');
@@ -1283,6 +1346,9 @@
       dom.btnCancelSettings?.addEventListener('click', closeSettingsModal);
       dom.btnSaveSettings?.addEventListener('click', saveSettingsFromModal);
       dom.settingsModal?.querySelector('.modal__backdrop')?.addEventListener('click', closeSettingsModal);
+
+      // Interval modal backdrop
+      dom.intervalModal?.querySelector('.modal__backdrop')?.addEventListener('click', closeIntervalModal);
 
       // Keyboard shortcuts
       window.addEventListener('keydown', (e) => {
