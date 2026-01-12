@@ -1,4 +1,9 @@
 Flask
 requests
-# optional if your org CA is in Windows Trust Store and you want Requests to use it:
+
+# Development dependencies (optional)
+# pytest          # Testing framework
+# flake8          # Code linting
+
+# Optional: if your org CA is in Windows Trust Store and you want Requests to use it:
 # certifi-win32
