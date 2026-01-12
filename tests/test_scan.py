@@ -40,7 +40,7 @@ def test_run_scan_logs_warning_on_error(monkeypatch, sample_cpe, capsys):
 def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
     now = datetime(2024, 1, 10, tzinfo=timezone.utc)
 
-    def fake_fetch(session, cpe, since, until, **kwargs):
+    def fake_fetch(session, cpe, since, until, insecure=False):
         assert cpe == sample_cpe
         # Vulnerability-Lookup format
         return [
@@ -123,3 +123,97 @@ def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
     assert record["cwes"] == ["CWE-89"]
     assert record["refs"][0]["url"] == "https://example2"
     assert updated["per_cpe"][sample_cpe]
+
+
+def test_run_scan_deduplicates_by_latest_modified(monkeypatch, sample_cpe):
+    """Test that when multiple entries exist for the same CVE, the latest one is kept."""
+
+    def fake_fetch(session, cpe, since, until, insecure=False):
+        # Return two entries for the same CVE with different modification dates
+        return [
+            {
+                "id": "CVE-2024-1234",
+                "Published": "2024-01-01T00:00:00.000Z",
+                "last-modified": "2024-01-10T00:00:00.000Z",  # Older
+                "summary": "Old description",
+                "cvss-metrics": [],
+            },
+            {
+                "id": "CVE-2024-1234",
+                "Published": "2024-01-01T00:00:00.000Z",
+                "last-modified": "2024-01-15T00:00:00.000Z",  # Newer
+                "summary": "Updated description",
+                "cvss-metrics": [],
+            },
+        ]
+
+    monkeypatch.setattr(scan, "fetch_for_cpe", fake_fetch)
+
+    results, _ = scan.run_scan(
+        cpes=[sample_cpe],
+        state_all={},
+        state_key="nvd:test",
+        session=object(),
+        insecure=False,
+        since=datetime.now(timezone.utc) - timedelta(days=30),
+    )
+
+    # Should only have one result (deduplicated)
+    assert len(results) == 1
+    assert results[0]["cve"] == "CVE-2024-1234"
+    assert results[0]["description"] == "Updated description"
+    assert results[0]["lastModified"] == "2024-01-15T00:00:00.000Z"
+
+
+def test_run_scan_handles_empty_response(monkeypatch, sample_cpe):
+    """Test that empty API responses are handled gracefully."""
+
+    def fake_fetch(session, cpe, since, until, insecure=False):
+        return []
+
+    monkeypatch.setattr(scan, "fetch_for_cpe", fake_fetch)
+
+    results, updated = scan.run_scan(
+        cpes=[sample_cpe],
+        state_all={},
+        state_key="nvd:test",
+        session=object(),
+        insecure=False,
+        since=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+
+    assert results == []
+    assert updated["per_cpe"][sample_cpe]  # State should still be updated
+
+
+def test_run_scan_multiple_cpes(monkeypatch):
+    """Test scanning multiple CPEs at once."""
+    cpes = [
+        "cpe:2.3:a:vendor1:product1:1:*:*:*:*:*:*:*",
+        "cpe:2.3:a:vendor2:product2:2:*:*:*:*:*:*:*",
+    ]
+
+    def fake_fetch(session, cpe, since, until, insecure=False):
+        if "vendor1" in cpe:
+            return [{"id": "CVE-2024-1111", "last-modified": "2024-01-01T00:00:00.000Z", "cvss-metrics": []}]
+        elif "vendor2" in cpe:
+            return [{"id": "CVE-2024-2222", "last-modified": "2024-01-02T00:00:00.000Z", "cvss-metrics": []}]
+        return []
+
+    monkeypatch.setattr(scan, "fetch_for_cpe", fake_fetch)
+
+    results, updated = scan.run_scan(
+        cpes=cpes,
+        state_all={},
+        state_key="nvd:test",
+        session=object(),
+        insecure=False,
+        since=datetime.now(timezone.utc) - timedelta(days=30),
+    )
+
+    assert len(results) == 2
+    cve_ids = [r["cve"] for r in results]
+    assert "CVE-2024-1111" in cve_ids
+    assert "CVE-2024-2222" in cve_ids
+    # Both CPEs should be in the state
+    assert len(updated["per_cpe"]) == 2
