@@ -24,6 +24,7 @@
     const collapsedKey = 'cpexvtops-collapsed-projects';
     const settingsKey = 'cpexvtops-settings';
     const mitigatedKey = 'cpexvtops-mitigated';
+    const welcomeHiddenKey = 'cpexvtops-welcome-hidden';
 
     // Load persisted state
     const collapsedInitial = new Set();
@@ -57,6 +58,12 @@
       console.warn('Unable to read settings', err);
     }
 
+    // Check if welcome banner should be hidden
+    let welcomeHidden = false;
+    try {
+      welcomeHidden = window.localStorage.getItem(welcomeHiddenKey) === 'true';
+    } catch (err) {}
+
     const state = {
       projects: bootstrap.projects || [],
       lists: bootstrap.lists || [],
@@ -88,6 +95,9 @@
       scanPeriod: '7d',
       currentPage: 1,
       pageSize: 25,
+      // New state for scan modes
+      scanMode: 'quick', // 'quick' or 'full'
+      currentStep: 1,
     };
 
     // DOM references
@@ -99,35 +109,51 @@
       selectAllBox: document.getElementById('wlSelectAll'),
       selectedCount: document.getElementById('selectedCount'),
       deleteSelectedBtn: document.getElementById('btnDeleteSelected'),
-      newWatchBtn: document.getElementById('btnNewWatch'),
       newProjectBtn: document.getElementById('btnNewProject'),
+
+      // Welcome banner
+      welcomeBanner: document.getElementById('welcomeBanner'),
+      btnHideWelcome: document.getElementById('btnHideWelcome'),
+      btnStartQuickScan: document.getElementById('btnStartQuickScan'),
+      btnStartFullScan: document.getElementById('btnStartFullScan'),
+
+      // Mode selector
+      scanModeSelector: document.getElementById('scanModeSelector'),
+      modeQuickScan: document.getElementById('modeQuickScan'),
+      modeFullScan: document.getElementById('modeFullScan'),
+      quickModeDesc: document.getElementById('quickModeDesc'),
+      fullModeDesc: document.getElementById('fullModeDesc'),
+
+      // Steps
+      stepsIndicator: document.querySelector('.steps-indicator'),
+      step1Card: document.getElementById('step1Card'),
+      step2CardQuick: document.getElementById('step2CardQuick'),
+      step2CardFull: document.getElementById('step2CardFull'),
+      btnStep1Next: document.getElementById('btnStep1Next'),
+      btnStep2Back: document.getElementById('btnStep2Back'),
+      btnStep2FullBack: document.getElementById('btnStep2FullBack'),
 
       // CPE Builder
       builderToggle: document.getElementById('builderToggle'),
       builderBody: document.getElementById('builderBody'),
       builderOutput: document.getElementById('b_output'),
-      builderSuggestions: document.getElementById('builderSuggestions'),
       cpeList: document.getElementById('cpeList'),
+      cpeListCount: document.getElementById('cpeListCount'),
+      btnClearCpes: document.getElementById('btnClearCpes'),
       manualCpeInput: document.getElementById('manualCpeInput'),
       btnAddManualCpe: document.getElementById('btnAddManualCpe'),
       btnAddCpe: document.getElementById('b_add'),
 
-      // Schedule
-      scheduleIntervals: document.getElementById('scheduleIntervals'),
-      btnAddInterval: document.getElementById('btnAddInterval'),
-      scanFromDate: document.getElementById('scanFromDate'),
-      scanToDate: document.getElementById('scanToDate'),
-      btnSaveAndScan: document.getElementById('btnSaveAndScan'),
+      // Quick scan options
+      quickOptKev: document.getElementById('quickOptKev'),
+      btnQuickScan: document.getElementById('btnQuickScan'),
 
-      // Form
-      form: document.getElementById('watchForm'),
-      formId: document.getElementById('formWatchId'),
-      formTitle: document.getElementById('formTitle'),
-      formProjectLabel: document.getElementById('formProjectLabel'),
+      // Full scan form
       formProject: document.getElementById('formProject'),
       formName: document.getElementById('formName'),
-      formCpes: document.getElementById('formCpes'),
       formComments: document.getElementById('formComments'),
+      formWatchId: document.getElementById('formWatchId'),
+      formCpes: document.getElementById('formCpes'),
       optNoRejected: document.getElementById('optNoRejected'),
       optIsVulnerable: document.getElementById('optIsVulnerable'),
       optHasKev: document.getElementById('optHasKev'),
@@ -136,9 +162,13 @@
       optHttpsProxy: document.getElementById('optHttpsProxy'),
       optCaBundle: document.getElementById('optCaBundle'),
       optTimeout: document.getElementById('optTimeout'),
-      formWarnings: document.getElementById('formWarnings'),
-      btnSaveWatch: document.getElementById('btnSaveWatch'),
-      btnDeleteWatch: document.getElementById('btnDeleteWatch'),
+
+      // Schedule
+      scheduleIntervals: document.getElementById('scheduleIntervals'),
+      btnAddInterval: document.getElementById('btnAddInterval'),
+      btnSaveOnly: document.getElementById('btnSaveOnly'),
+      btnSaveAndScan: document.getElementById('btnSaveAndScan'),
+      btnCreateTeamInline: document.getElementById('btnCreateTeamInline'),
 
       // Filters
       filterCve: document.getElementById('f_cve'),
@@ -156,10 +186,15 @@
       windowLabel: document.getElementById('windowLabel'),
       resCount: document.getElementById('resCount'),
       resBody: document.getElementById('resBody'),
+      resultsEmptyState: document.getElementById('resultsEmptyState'),
+      resultsLoading: document.getElementById('resultsLoading'),
+      resultsTableWrapper: document.getElementById('resultsTableWrapper'),
+      loadingStatus: document.getElementById('loadingStatus'),
       btnExportCsv: document.getElementById('btnExportCsv'),
       btnExportNdjson: document.getElementById('btnExportNdjson'),
 
       // Pagination
+      tablePagination: document.getElementById('tablePagination'),
       btnPrevPage: document.getElementById('btnPrevPage'),
       btnNextPage: document.getElementById('btnNextPage'),
       pageInfo: document.getElementById('pageInfo'),
@@ -170,6 +205,9 @@
       detailMeta: document.getElementById('d_meta'),
       detailMatched: document.getElementById('d_matched'),
       detailDesc: document.getElementById('d_desc'),
+      detailCvss: document.getElementById('d_cvss'),
+      detailEpss: document.getElementById('d_epss'),
+      detailSeverity: document.getElementById('d_severity'),
       detailCwes: document.getElementById('d_cwes'),
       detailKev: document.getElementById('d_kev'),
       detailKevDetails: document.getElementById('d_kev_details'),
@@ -197,6 +235,13 @@
       btnCancelInterval: document.getElementById('btnCancelInterval'),
       btnConfirmInterval: document.getElementById('btnConfirmInterval'),
       intervalTime: document.getElementById('intervalTime'),
+
+      // Create team modal
+      createTeamModal: document.getElementById('createTeamModal'),
+      btnCloseCreateTeam: document.getElementById('btnCloseCreateTeam'),
+      btnCancelCreateTeam: document.getElementById('btnCancelCreateTeam'),
+      btnConfirmCreateTeam: document.getElementById('btnConfirmCreateTeam'),
+      newTeamName: document.getElementById('newTeamName'),
     };
 
     const builderFields = [
@@ -234,9 +279,8 @@
       async runWatchlist(id, window) {
         return requestJson('/api/run', { method: 'POST', body: { watchlistId: id, window } });
       },
-      async suggestCpe(params) {
-        const qs = new URLSearchParams(params);
-        return requestJson(`/api/cpe_suggest?${qs.toString()}`);
+      async quickScan(cpes, window, kevOnly = false) {
+        return requestJson('/api/quick-scan', { method: 'POST', body: { cpes, window, kevOnly } });
       },
     };
 
@@ -318,6 +362,82 @@
         .sort((a, b) => (a.order || 0) - (b.order || 0));
     }
 
+    // Mode and Step Management
+    function setScanMode(mode) {
+      state.scanMode = mode;
+
+      // Update mode toggle buttons
+      if (dom.modeQuickScan) {
+        dom.modeQuickScan.classList.toggle('mode-toggle__btn--active', mode === 'quick');
+      }
+      if (dom.modeFullScan) {
+        dom.modeFullScan.classList.toggle('mode-toggle__btn--active', mode === 'full');
+      }
+
+      // Update mode descriptions
+      if (dom.quickModeDesc) dom.quickModeDesc.classList.toggle('hidden', mode !== 'quick');
+      if (dom.fullModeDesc) dom.fullModeDesc.classList.toggle('hidden', mode !== 'full');
+
+      // Show appropriate step 2 card
+      updateStepCards();
+    }
+
+    function setCurrentStep(step) {
+      state.currentStep = step;
+      updateStepIndicator();
+      updateStepCards();
+    }
+
+    function updateStepIndicator() {
+      if (!dom.stepsIndicator) return;
+      const steps = dom.stepsIndicator.querySelectorAll('.step');
+      const connectors = dom.stepsIndicator.querySelectorAll('.step__connector');
+
+      steps.forEach((stepEl, idx) => {
+        const stepNum = idx + 1;
+        stepEl.classList.remove('step--active', 'step--complete');
+        if (stepNum === state.currentStep) {
+          stepEl.classList.add('step--active');
+        } else if (stepNum < state.currentStep) {
+          stepEl.classList.add('step--complete');
+        }
+      });
+
+      connectors.forEach((conn, idx) => {
+        conn.classList.toggle('step__connector--active', idx + 1 < state.currentStep);
+      });
+    }
+
+    function updateStepCards() {
+      // Step 1 always visible
+      if (dom.step1Card) {
+        dom.step1Card.classList.toggle('step-card--active', state.currentStep === 1);
+        dom.step1Card.classList.toggle('hidden', false);
+      }
+
+      // Step 2 - show appropriate card based on mode
+      if (dom.step2CardQuick) {
+        const showQuick = state.scanMode === 'quick' && state.currentStep >= 2;
+        dom.step2CardQuick.classList.toggle('hidden', !showQuick);
+        dom.step2CardQuick.classList.toggle('step-card--active', state.currentStep === 2 && state.scanMode === 'quick');
+      }
+
+      if (dom.step2CardFull) {
+        const showFull = state.scanMode === 'full' && state.currentStep >= 2;
+        dom.step2CardFull.classList.toggle('hidden', !showFull);
+        dom.step2CardFull.classList.toggle('step-card--active', state.currentStep === 2 && state.scanMode === 'full');
+      }
+
+      // Update step 1 next button state
+      updateStep1NextButton();
+    }
+
+    function updateStep1NextButton() {
+      if (dom.btnStep1Next) {
+        dom.btnStep1Next.disabled = state.cpeList.length === 0;
+      }
+    }
+
     // Sidebar rendering with team cards
     function renderSidebar() {
       if (!dom.projectsContainer) return;
@@ -326,29 +446,24 @@
       // Empty state
       if (state.projects.length === 0) {
         const emptyState = document.createElement('div');
-        emptyState.className = 'text-center py-8 px-4';
+        emptyState.className = 'text-center py-6 px-4';
         emptyState.innerHTML = `
-          <svg viewBox="0 0 24 24" class="h-12 w-12 mx-auto text-slate-300 mb-3" fill="none" stroke="currentColor" stroke-width="1.5">
+          <svg viewBox="0 0 24 24" class="h-10 w-10 mx-auto text-slate-300 mb-2" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            <path d="M12 8v4m0 4h.01"/>
           </svg>
-          <p class="text-slate-500 text-sm mb-2">No teams yet</p>
-          <p class="text-slate-400 text-xs mb-4">Create a team to start monitoring vulnerabilities</p>
-          <button id="emptyStateNewTeam" class="btn btn--primary">Create First Team</button>
+          <p class="text-slate-500 text-sm mb-1">No saved watchlists</p>
+          <p class="text-slate-400 text-xs">Use Full Scan mode to create one</p>
         `;
         dom.projectsContainer.appendChild(emptyState);
-        emptyState.querySelector('#emptyStateNewTeam')?.addEventListener('click', async () => {
-          const name = prompt('Team name', 'My First Team');
-          if (!name) return;
-          await api.createProject(name);
-          await api.getWatchlists();
-        });
         return;
       }
 
       state.projects.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((project) => {
+        const lists = sortedListsFor(project.id);
+        if (lists.length === 0) return; // Skip empty projects
+
         const wrapper = document.createElement('section');
-        wrapper.className = 'team-card' + (state.currentWatchId && findWatchlist(state.currentWatchId)?.projectId === project.id ? ' team-card--active' : '');
+        wrapper.className = 'team-card';
         wrapper.dataset.projectId = project.id;
 
         const header = document.createElement('div');
@@ -372,9 +487,8 @@
         playBtn.title = 'Run scan';
         playBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const lists = sortedListsFor(project.id);
           if (lists.length > 0) {
-            selectWatchlist(lists[0].id, true, state.scanPeriod === 'custom' ? '24h' : state.scanPeriod);
+            selectWatchlist(lists[0].id, true, state.scanPeriod === 'custom' ? '7d' : state.scanPeriod);
           }
         });
 
@@ -392,91 +506,32 @@
           renderSidebar();
         });
 
-        // Edit button
-        const editBtn = document.createElement('button');
-        editBtn.className = 'team-card__action';
-        editBtn.innerHTML = '<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-        editBtn.title = 'Edit team';
-        editBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const newName = prompt('Team name', project.name);
-          if (newName && newName !== project.name) {
-            api.renameProject(project.id, newName).then(() => api.getWatchlists());
-          }
-        });
-
-        // Delete button
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'team-card__action team-card__action--delete';
-        deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-        deleteBtn.title = 'Delete team';
-        deleteBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (confirm('Delete this team? Teams must be empty.')) {
-            api.deleteProject(project.id).then(() => api.getWatchlists());
-          }
-        });
+        // Collapse indicator
+        const collapseIcon = document.createElement('span');
+        collapseIcon.className = 'text-slate-400 text-xs';
+        collapseIcon.textContent = state.collapsed.has(project.id) ? '+' : '-';
 
         header.appendChild(checkbox);
         header.appendChild(playBtn);
         header.appendChild(nameEl);
-        header.appendChild(editBtn);
-        header.appendChild(deleteBtn);
+        header.appendChild(collapseIcon);
         wrapper.appendChild(header);
 
         // CPE list (collapsible)
         if (!state.collapsed.has(project.id)) {
-          const lists = sortedListsFor(project.id);
           const cpeContainer = document.createElement('div');
           cpeContainer.className = 'mt-2 space-y-1';
 
           lists.forEach((watch) => {
-            watch.cpes.forEach((cpe, idx) => {
-              if (idx < 3) { // Show max 3 CPEs
-                const cpeEl = document.createElement('div');
-                cpeEl.className = 'cpe-item';
-                const cpeShort = (cpe || '').replace('cpe:2.3:', '');
-                cpeEl.innerHTML = `
-                  <span class="cpe-item__name" title="${escapeHtml(cpe)}">${escapeHtml(cpeShort)}</span>
-                  <span class="cpe-item__status cpe-item__status--ok"></span>
-                `;
-                cpeEl.addEventListener('click', () => selectWatchlist(watch.id, false));
-                cpeContainer.appendChild(cpeEl);
-              }
-            });
-            if (watch.cpes.length > 3) {
-              const moreEl = document.createElement('div');
-              moreEl.className = 'text-xs text-slate-400 pl-2';
-              moreEl.textContent = `+${watch.cpes.length - 3} more...`;
-              cpeContainer.appendChild(moreEl);
-            }
+            const watchItem = document.createElement('div');
+            watchItem.className = 'p-2 bg-slate-50 rounded text-xs cursor-pointer hover:bg-slate-100';
+            watchItem.innerHTML = `
+              <div class="font-medium text-slate-700">${escapeHtml(watch.name)}</div>
+              <div class="text-slate-500 mt-1">${watch.cpes.length} CPE(s)</div>
+            `;
+            watchItem.addEventListener('click', () => selectWatchlist(watch.id, false));
+            cpeContainer.appendChild(watchItem);
           });
-
-          // Scheduled scans display
-          if (state.scheduleIntervals.length > 0) {
-            const schedDiv = document.createElement('div');
-            schedDiv.className = 'scheduled-scans';
-            schedDiv.innerHTML = '<div class="text-xs font-medium text-slate-500 mb-1">Scheduled:</div>';
-            state.scheduleIntervals.slice(0, 4).forEach((time, idx) => {
-              const scanEl = document.createElement('div');
-              scanEl.className = 'scheduled-scan';
-              scanEl.innerHTML = `
-                <span>Scan ${idx + 1}</span>
-                <span class="scheduled-scan__time">${time}</span>
-              `;
-              schedDiv.appendChild(scanEl);
-            });
-            cpeContainer.appendChild(schedDiv);
-          }
-
-          // Comments preview
-          const watch = lists[0];
-          if (watch?.comments) {
-            const commentDiv = document.createElement('div');
-            commentDiv.className = 'mt-2 p-2 bg-slate-50 rounded text-xs text-slate-600';
-            commentDiv.textContent = watch.comments.substring(0, 100) + (watch.comments.length > 100 ? '...' : '');
-            cpeContainer.appendChild(commentDiv);
-          }
 
           wrapper.appendChild(cpeContainer);
         }
@@ -490,6 +545,15 @@
     function populateProjectSelect() {
       if (!dom.formProject) return;
       dom.formProject.innerHTML = '';
+
+      if (state.projects.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '-- Create a team first --';
+        dom.formProject.appendChild(option);
+        return;
+      }
+
       state.projects.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).forEach((project) => {
         const option = document.createElement('option');
         option.value = project.id;
@@ -498,7 +562,7 @@
       });
     }
 
-    function selectWatchlist(id, runImmediately = false, window = '24h') {
+    function selectWatchlist(id, runImmediately = false, window = '7d') {
       state.currentWatchId = id;
       state.detailIndex = -1;
       state.selectedIds.clear();
@@ -508,16 +572,19 @@
         renderSidebar();
         return;
       }
+
+      // Switch to full mode and fill form
+      setScanMode('full');
+      setCurrentStep(2);
       fillForm(watch);
       renderSidebar();
       updateBulkState();
-      if (runImmediately) runCurrent(window);
+      if (runImmediately) runWatchlistScan(window);
     }
 
     function clearForm() {
-      if (dom.formId) dom.formId.value = '';
-      if (dom.formTitle) dom.formTitle.textContent = 'Create team';
-      if (dom.formProjectLabel) dom.formProjectLabel.textContent = '';
+      if (dom.formWatchId) dom.formWatchId.value = '';
+      if (dom.formProject && state.projects.length > 0) dom.formProject.value = state.projects[0].id;
       if (dom.formName) dom.formName.value = '';
       if (dom.formCpes) dom.formCpes.value = '';
       if (dom.formComments) dom.formComments.value = '';
@@ -529,16 +596,10 @@
       if (dom.optHttpsProxy) dom.optHttpsProxy.value = '';
       if (dom.optCaBundle) dom.optCaBundle.value = '';
       if (dom.optTimeout) dom.optTimeout.value = '';
-      if (dom.formWarnings) dom.formWarnings.textContent = '';
-      state.cpeList = [];
-      renderCpeList();
     }
 
     function fillForm(watch) {
-      if (dom.formId) dom.formId.value = watch.id;
-      if (dom.formTitle) dom.formTitle.textContent = 'Edit team';
-      const project = state.projects.find((p) => p.id === watch.projectId);
-      if (dom.formProjectLabel) dom.formProjectLabel.textContent = project ? project.name : '';
+      if (dom.formWatchId) dom.formWatchId.value = watch.id;
       if (dom.formProject) dom.formProject.value = watch.projectId;
       if (dom.formName) dom.formName.value = watch.name || '';
       if (dom.formCpes) dom.formCpes.value = watch.cpes.join(', ');
@@ -577,7 +638,18 @@
 
     async function saveWatchlist() {
       const payload = gatherFormData();
-      const watchId = dom.formId?.value;
+
+      if (!payload.projectId) {
+        showAlert('Please select a team first.', 'error');
+        return null;
+      }
+
+      if (!payload.name) {
+        showAlert('Please enter a watchlist name.', 'error');
+        return null;
+      }
+
+      const watchId = dom.formWatchId?.value;
       try {
         let response;
         if (watchId) {
@@ -593,84 +665,153 @@
           renderSidebar();
           populateProjectSelect();
           fillForm(response.watchlist);
-          showAlert('Team saved.', 'success', 2000);
+          showAlert('Watchlist saved.', 'success', 2000);
+          return response.watchlist;
         }
       } catch (err) {
         console.error('Save failed', err);
       }
+      return null;
     }
 
-    async function deleteCurrentWatch() {
-      const watchId = dom.formId?.value;
-      if (!watchId) { clearForm(); return; }
-      if (!confirm('Delete this team?')) return;
-      try {
-        await api.deleteWatchlist(watchId);
-        state.lists = state.lists.filter((w) => w.id !== watchId);
-        state.currentWatchId = null;
-        clearForm();
-        renderSidebar();
-        showAlert('Team deleted.', 'success', 2000);
-      } catch (err) {
-        console.error('Delete failed', err);
-      }
-    }
-
-    async function runCurrent(window) {
+    // Scan functions
+    async function runQuickScan() {
       if (state.pendingRun) return;
-      const watchId = dom.formId?.value;
-      if (!watchId) await saveWatchlist();
-      const id = dom.formId?.value;
-      if (!id) {
-        showAlert('Save the team before running.', 'error');
+      if (state.cpeList.length === 0) {
+        showAlert('Please add at least one CPE to scan.', 'error');
         return;
       }
-      state.pendingRun = true;
 
-      // Show loading state
-      if (dom.btnSaveAndScan) {
-        dom.btnSaveAndScan.disabled = true;
-        dom.btnSaveAndScan.textContent = 'Scanning...';
-      }
-      showAlert('Scanning vulnerabilities...', 'info', 0);
+      state.pendingRun = true;
+      showLoadingState('Connecting to vulnerability database...');
+
+      const kevOnly = dom.quickOptKev?.checked || false;
 
       try {
-        const result = await api.runWatchlist(id, window);
+        updateLoadingStatus('Scanning CPEs for vulnerabilities...');
+        const result = await api.quickScan(state.cpeList, state.scanPeriod, kevOnly);
+
         state.originalResults = result.results || [];
         state.windowLabel = result.windowLabel || '';
+        hideLoadingState();
         applyFilters();
 
-        // Clear loading alert and show success
-        dom.alerts.innerHTML = '';
         showAlert(`Found ${state.originalResults.length} vulnerabilities.`, 'success', 3000);
-        if (dom.windowLabel) dom.windowLabel.textContent = `Window: ${state.windowLabel || '-'}`;
+        if (dom.windowLabel) dom.windowLabel.textContent = `Quick Scan - ${state.windowLabel}`;
+
+        // Move to step 3 (results)
+        setCurrentStep(3);
+
+        // Enable export buttons
+        if (dom.btnExportCsv) dom.btnExportCsv.disabled = false;
+        if (dom.btnExportNdjson) dom.btnExportNdjson.disabled = false;
+
       } catch (err) {
-        console.error('Run failed', err);
-        dom.alerts.innerHTML = '';
+        console.error('Quick scan failed', err);
+        hideLoadingState();
         showAlert('Scan failed. Please try again.', 'error', 5000);
       } finally {
         state.pendingRun = false;
-        if (dom.btnSaveAndScan) {
-          dom.btnSaveAndScan.disabled = false;
-          dom.btnSaveAndScan.textContent = 'Save & Scan';
-        }
       }
+    }
+
+    async function runWatchlistScan(window) {
+      if (state.pendingRun) return;
+
+      const watchId = dom.formWatchId?.value;
+      if (!watchId) {
+        // Need to save first
+        const saved = await saveWatchlist();
+        if (!saved) return;
+      }
+
+      const id = dom.formWatchId?.value;
+      if (!id) {
+        showAlert('Save the watchlist before running.', 'error');
+        return;
+      }
+
+      state.pendingRun = true;
+      showLoadingState('Connecting to vulnerability database...');
+
+      try {
+        updateLoadingStatus('Scanning CPEs for vulnerabilities...');
+        const result = await api.runWatchlist(id, window);
+
+        state.originalResults = result.results || [];
+        state.windowLabel = result.windowLabel || '';
+        hideLoadingState();
+        applyFilters();
+
+        showAlert(`Found ${state.originalResults.length} vulnerabilities.`, 'success', 3000);
+        if (dom.windowLabel) dom.windowLabel.textContent = `Watchlist Scan - ${state.windowLabel}`;
+
+        // Move to step 3 (results)
+        setCurrentStep(3);
+
+        // Enable export buttons
+        if (dom.btnExportCsv) dom.btnExportCsv.disabled = false;
+        if (dom.btnExportNdjson) dom.btnExportNdjson.disabled = false;
+
+      } catch (err) {
+        console.error('Scan failed', err);
+        hideLoadingState();
+        showAlert('Scan failed. Please try again.', 'error', 5000);
+      } finally {
+        state.pendingRun = false;
+      }
+    }
+
+    function showLoadingState(message) {
+      if (dom.resultsEmptyState) dom.resultsEmptyState.classList.add('hidden');
+      if (dom.resultsTableWrapper) dom.resultsTableWrapper.classList.add('hidden');
+      if (dom.tablePagination) dom.tablePagination.classList.add('hidden');
+      if (dom.resultsLoading) dom.resultsLoading.classList.remove('hidden');
+      if (dom.loadingStatus) dom.loadingStatus.textContent = message || 'Loading...';
+      dom.alerts.innerHTML = '';
+    }
+
+    function updateLoadingStatus(message) {
+      if (dom.loadingStatus) dom.loadingStatus.textContent = message;
+    }
+
+    function hideLoadingState() {
+      if (dom.resultsLoading) dom.resultsLoading.classList.add('hidden');
     }
 
     // CPE List management
     function renderCpeList() {
       if (!dom.cpeList) return;
+
+      // Update count
+      if (dom.cpeListCount) dom.cpeListCount.textContent = String(state.cpeList.length);
+
+      // Show/hide clear button
+      if (dom.btnClearCpes) {
+        dom.btnClearCpes.classList.toggle('hidden', state.cpeList.length === 0);
+      }
+
       if (state.cpeList.length === 0) {
-        dom.cpeList.innerHTML = '<div class="text-xs text-slate-400 italic">No CPEs added yet</div>';
+        dom.cpeList.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" class="h-8 w-8 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <p class="text-xs text-slate-400">No CPEs added yet</p>
+            <p class="text-xs text-slate-400">Build or paste a CPE above</p>
+          </div>
+        `;
+        updateStep1NextButton();
         return;
       }
+
       dom.cpeList.innerHTML = '';
       state.cpeList.forEach((cpe, idx) => {
         const item = document.createElement('div');
         item.className = 'cpe-list-item';
         item.innerHTML = `
-          <span class="truncate" title="${escapeHtml(cpe)}">${escapeHtml(cpe)}</span>
-          <button class="cpe-list-item__remove" data-idx="${idx}">&times;</button>
+          <span class="truncate flex-1" title="${escapeHtml(cpe)}">${escapeHtml(cpe)}</span>
+          <button class="cpe-list-item__remove" data-idx="${idx}" title="Remove">&times;</button>
         `;
         item.querySelector('button').addEventListener('click', () => {
           state.cpeList.splice(idx, 1);
@@ -679,6 +820,8 @@
         });
         dom.cpeList.appendChild(item);
       });
+
+      updateStep1NextButton();
     }
 
     function updateFormCpes() {
@@ -686,48 +829,41 @@
     }
 
     function addCpeToList(cpe) {
-      if (!cpe || state.cpeList.includes(cpe)) return;
-      state.cpeList.push(cpe);
+      if (!cpe) return;
+      const trimmed = cpe.trim();
+      if (!trimmed || state.cpeList.includes(trimmed)) return;
+      state.cpeList.push(trimmed);
       renderCpeList();
       updateFormCpes();
+      showAlert('CPE added to list.', 'success', 1500);
     }
 
     // Schedule management
     function renderScheduleIntervals() {
       if (!dom.scheduleIntervals) return;
+      if (state.scheduleIntervals.length === 0) {
+        dom.scheduleIntervals.innerHTML = '<div class="text-xs text-slate-400 italic">No scheduled scans</div>';
+        return;
+      }
+
       dom.scheduleIntervals.innerHTML = '';
       state.scheduleIntervals.forEach((time, idx) => {
         const item = document.createElement('div');
         item.className = 'interval-item';
         item.innerHTML = `
           <span class="interval-item__time">${escapeHtml(time)}</span>
-          <span class="text-xs text-slate-500">Daily</span>
+          <span class="text-xs text-slate-500">UTC</span>
           <div class="interval-item__actions">
-            <button class="interval-item__action interval-item__action--edit" title="Edit">
-              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            </button>
-            <button class="interval-item__action interval-item__action--delete" title="Delete" data-idx="${idx}">
-              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <button class="interval-item__action interval-item__action--delete" title="Remove" data-idx="${idx}">
+              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
         `;
-        item.querySelector('.interval-item__action--edit').addEventListener('click', () => {
-          const newTime = prompt('Edit time (HH:MM)', time);
-          if (newTime && /^\d{2}:\d{2}$/.test(newTime)) {
-            state.scheduleIntervals[idx] = newTime;
-            state.scheduleIntervals.sort();
-            settings.scanTimes = state.scheduleIntervals.join(',');
-            saveSettings();
-            renderScheduleIntervals();
-            renderSidebar();
-          }
-        });
         item.querySelector('.interval-item__action--delete').addEventListener('click', () => {
           state.scheduleIntervals.splice(idx, 1);
           settings.scanTimes = state.scheduleIntervals.join(',');
           saveSettings();
           renderScheduleIntervals();
-          renderSidebar();
         });
         dom.scheduleIntervals.appendChild(item);
       });
@@ -750,7 +886,7 @@
       if (dateFilter !== 'custom') {
         const days = parseInt(dateFilter, 10);
         dateThreshold = new Date();
-        dateThreshold.setHours(0, 0, 0, 0); // Start of today
+        dateThreshold.setHours(0, 0, 0, 0);
         dateThreshold.setDate(dateThreshold.getDate() - days);
       }
 
@@ -837,6 +973,29 @@
       if (!dom.resBody) return;
       dom.resBody.innerHTML = '';
 
+      // Show/hide states based on results
+      const hasResults = state.filteredResults.length > 0;
+
+      if (dom.resultsEmptyState) dom.resultsEmptyState.classList.toggle('hidden', hasResults || state.originalResults.length > 0);
+      if (dom.resultsTableWrapper) dom.resultsTableWrapper.classList.toggle('hidden', !hasResults);
+      if (dom.tablePagination) dom.tablePagination.classList.toggle('hidden', !hasResults);
+
+      if (!hasResults) {
+        if (state.originalResults.length > 0 && dom.resultsEmptyState) {
+          // Filters resulted in no matches
+          dom.resultsEmptyState.classList.remove('hidden');
+          dom.resultsEmptyState.innerHTML = `
+            <svg viewBox="0 0 24 24" class="h-12 w-12 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.3-4.3"/>
+            </svg>
+            <h3 class="text-base font-semibold text-slate-600 mb-1">No Matching Results</h3>
+            <p class="text-sm text-slate-500">Try adjusting your filters</p>
+          `;
+        }
+        return;
+      }
+
       const start = (state.currentPage - 1) * state.pageSize;
       const end = start + state.pageSize;
       const pageResults = state.filteredResults.slice(start, end);
@@ -869,8 +1028,8 @@
 
         // KEV icon
         const kevIcon = item.kev
-          ? '<span class="kev-icon kev-icon--yes" title="CISA KEV">&check;</span>'
-          : '<span class="kev-icon kev-icon--no">&times;</span>';
+          ? '<span class="kev-icon kev-icon--yes" title="CISA Known Exploited Vulnerability">!</span>'
+          : '<span class="kev-icon kev-icon--no">-</span>';
 
         // Status badges
         let badges = '';
@@ -879,12 +1038,12 @@
 
         // Description (truncated and escaped)
         const rawDesc = item.description || '';
-        const desc = rawDesc.substring(0, 100) + (rawDesc.length > 100 ? '...' : '');
+        const desc = rawDesc.substring(0, 80) + (rawDesc.length > 80 ? '...' : '');
 
         tr.innerHTML = `
-          <td class="text-indigo-700 font-medium">${escapeHtml(item.id)}${badges}</td>
+          <td class="text-indigo-700 font-medium whitespace-nowrap">${escapeHtml(item.id)}${badges}</td>
           <td>${kevIcon}</td>
-          <td>${escapeHtml(item.published) || '-'}</td>
+          <td class="whitespace-nowrap">${escapeHtml(item.published?.split('T')[0]) || '-'}</td>
           <td class="text-xs text-slate-500">${escapeHtml(item.sourceIdentifier) || '-'}</td>
           <td class="description-cell text-xs" title="${escapeHtml(rawDesc)}">${escapeHtml(desc)}</td>
           <td class="${cvssClass}">${score ?? '-'}</td>
@@ -916,28 +1075,59 @@
 
       // Update CVE title
       if (dom.detailCve) {
-        let title = item.id || '';
-        if (item.kev) title += ' (KEV)';
-        if (item.is_new) title += ' (NEW)';
-        if (isMitigated) title += ' (MITIGATED)';
-        dom.detailCve.textContent = title;
+        let badges = '';
+        if (item.kev) badges += ' <span class="badge sev-Critical">KEV</span>';
+        if (item.is_new) badges += ' <span class="new-badge">NEW</span>';
+        if (isMitigated) badges += ' <span class="mitigated-badge">MITIGATED</span>';
+        dom.detailCve.innerHTML = `${escapeHtml(item.id)}${badges}`;
       }
 
       // Update metadata
       if (dom.detailMeta) {
-        const epss = item.epss !== null && item.epss !== undefined ? `${(item.epss * 100).toFixed(2)}%` : 'N/A';
-        const epssPct = item.epss_percentile !== null && item.epss_percentile !== undefined ? `${(item.epss_percentile * 100).toFixed(1)}th` : 'N/A';
-        dom.detailMeta.textContent = `CVSS: ${item.cvssScore ?? 'N/A'} | EPSS: ${epss} (${epssPct} percentile) | Published: ${item.published || 'N/A'} | Publisher: ${item.sourceIdentifier || 'N/A'}`;
+        dom.detailMeta.textContent = `Published: ${item.published || 'N/A'} | Source: ${item.sourceIdentifier || 'N/A'}`;
+      }
+
+      // Update stats
+      if (dom.detailCvss) {
+        const score = item.cvssScore;
+        let cvssClass = 'cvss-low';
+        if (score >= 9) cvssClass = 'cvss-critical';
+        else if (score >= 7) cvssClass = 'cvss-high';
+        else if (score >= 4) cvssClass = 'cvss-medium';
+        dom.detailCvss.className = `detail-stat__value ${cvssClass}`;
+        dom.detailCvss.textContent = score ?? 'N/A';
+      }
+
+      if (dom.detailEpss) {
+        const epss = item.epss;
+        let epssClass = 'epss-low';
+        let epssText = 'N/A';
+        if (epss !== null && epss !== undefined) {
+          epssText = `${(epss * 100).toFixed(2)}%`;
+          if (epss >= 0.5) epssClass = 'epss-high';
+          else if (epss >= 0.1) epssClass = 'epss-medium';
+        }
+        dom.detailEpss.className = `detail-stat__value ${epssClass}`;
+        dom.detailEpss.textContent = epssText;
+      }
+
+      if (dom.detailSeverity) {
+        const severity = item.severity || 'Unknown';
+        dom.detailSeverity.innerHTML = `<span class="badge sev-${severity}">${severity}</span>`;
       }
 
       if (dom.detailMatched) {
         dom.detailMatched.textContent = (item.matchedCPE || []).length ? `Matched CPE: ${(item.matchedCPE || []).join(', ')}` : '';
       }
 
-      if (dom.detailDesc) dom.detailDesc.textContent = item.description || '(no description)';
+      if (dom.detailDesc) dom.detailDesc.textContent = item.description || '(no description available)';
 
       if (dom.detailCwes) {
-        dom.detailCwes.textContent = (item.cwes || []).length ? `CWE: ${(item.cwes || []).join(', ')}` : '';
+        if ((item.cwes || []).length) {
+          dom.detailCwes.innerHTML = `<h4 class="text-sm font-semibold text-slate-700 mb-1">CWEs</h4><p class="text-sm text-slate-600">${(item.cwes || []).join(', ')}</p>`;
+        } else {
+          dom.detailCwes.innerHTML = '';
+        }
       }
 
       // KEV details
@@ -946,9 +1136,9 @@
           dom.detailKev.classList.remove('hidden');
           const kd = item.kev_data;
           dom.detailKevDetails.innerHTML = `
-            ${kd.dateAdded ? `<div>Added: ${escapeHtml(kd.dateAdded)}</div>` : ''}
-            ${kd.dueDate ? `<div>Due: ${escapeHtml(kd.dueDate)}</div>` : ''}
-            ${kd.requiredAction ? `<div>Action: ${escapeHtml(kd.requiredAction)}</div>` : ''}
+            ${kd.dateAdded ? `<div><strong>Date Added:</strong> ${escapeHtml(kd.dateAdded)}</div>` : ''}
+            ${kd.dueDate ? `<div><strong>Due Date:</strong> ${escapeHtml(kd.dueDate)}</div>` : ''}
+            ${kd.requiredAction ? `<div><strong>Required Action:</strong> ${escapeHtml(kd.requiredAction)}</div>` : ''}
           `;
         } else {
           dom.detailKev.classList.add('hidden');
@@ -958,16 +1148,28 @@
       // References
       if (dom.detailRefs) {
         dom.detailRefs.innerHTML = '';
-        (item.refs || item.references || []).forEach((ref) => {
-          const li = document.createElement('li');
-          const a = document.createElement('a');
-          a.href = ref.url || '#';
-          a.target = '_blank';
-          a.className = 'text-indigo-700 underline';
-          a.textContent = ref.tags?.length ? ref.tags.join(', ') : ref.source || ref.url || 'link';
-          li.appendChild(a);
-          dom.detailRefs.appendChild(li);
-        });
+        const refs = item.refs || item.references || [];
+        if (refs.length === 0) {
+          dom.detailRefs.innerHTML = '<li class="text-slate-400 italic">No references available</li>';
+        } else {
+          refs.slice(0, 10).forEach((ref) => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = ref.url || '#';
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.className = 'text-indigo-600 hover:underline';
+            a.textContent = ref.tags?.length ? `[${ref.tags.join(', ')}] ${ref.url}` : ref.url || 'link';
+            li.appendChild(a);
+            dom.detailRefs.appendChild(li);
+          });
+          if (refs.length > 10) {
+            const li = document.createElement('li');
+            li.className = 'text-slate-500 italic';
+            li.textContent = `... and ${refs.length - 10} more`;
+            dom.detailRefs.appendChild(li);
+          }
+        }
       }
 
       if (dom.linkNvd) dom.linkNvd.href = `https://nvd.nist.gov/vuln/detail/${item.id}`;
@@ -999,13 +1201,13 @@
         return;
       }
       navigator.clipboard.writeText(JSON.stringify(item, null, 2)).then(() => {
-        showAlert('CVE JSON copied.', 'success', 2000);
+        showAlert('JSON copied to clipboard.', 'success', 2000);
       });
     }
 
     // Export functions
     function exportCsv() {
-      const rows = [['CVE', 'KEV', 'Published', 'Publisher', 'CVSS', 'EPSS', 'Description', 'Mitigated']];
+      const rows = [['CVE', 'KEV', 'Published', 'Source', 'CVSS', 'Severity', 'EPSS', 'Description', 'Mitigated']];
       state.filteredResults.forEach((item) => {
         rows.push([
           item.id || '',
@@ -1013,8 +1215,9 @@
           item.published || '',
           item.sourceIdentifier || '',
           item.cvssScore ?? '',
+          item.severity || '',
           item.epss !== null ? (item.epss * 100).toFixed(2) + '%' : '',
-          (item.description || '').replace(/\n/g, ' '),
+          (item.description || '').replace(/[\n\r]+/g, ' ').substring(0, 500),
           mitigatedCves.has(item.id) ? 'yes' : 'no',
         ]);
       });
@@ -1076,7 +1279,7 @@
         const raw = 'value' in field ? field.value : '';
         return escapeSegment(raw.trim());
       });
-      const part = values.shift() || 'o';
+      const part = values.shift() || 'a';
       return `cpe:2.3:${part}:${values.join(':')}`;
     }
 
@@ -1084,7 +1287,7 @@
       if (dom.builderOutput) dom.builderOutput.textContent = buildCpe();
     }
 
-    // Settings modal
+    // Modal functions
     function openSettingsModal() {
       if (dom.settingScanTimes) dom.settingScanTimes.value = settings.scanTimes;
       if (dom.settingCvssThreshold) dom.settingCvssThreshold.value = settings.cvssThreshold || '';
@@ -1105,12 +1308,10 @@
       state.scheduleIntervals = settings.scanTimes.split(',').filter(Boolean);
       saveSettings();
       renderScheduleIntervals();
-      renderSidebar();
       closeSettingsModal();
       showAlert('Settings saved.', 'success', 2000);
     }
 
-    // Interval modal
     function openIntervalModal() {
       dom.intervalModal?.classList.remove('hidden');
     }
@@ -1127,13 +1328,82 @@
         settings.scanTimes = state.scheduleIntervals.join(',');
         saveSettings();
         renderScheduleIntervals();
-        renderSidebar();
       }
       closeIntervalModal();
     }
 
+    function openCreateTeamModal() {
+      if (dom.newTeamName) dom.newTeamName.value = '';
+      dom.createTeamModal?.classList.remove('hidden');
+    }
+
+    function closeCreateTeamModal() {
+      dom.createTeamModal?.classList.add('hidden');
+    }
+
+    async function createTeamFromModal() {
+      const name = dom.newTeamName?.value?.trim();
+      if (!name) {
+        showAlert('Please enter a team name.', 'error');
+        return;
+      }
+      try {
+        await api.createProject(name);
+        await api.getWatchlists();
+        closeCreateTeamModal();
+        showAlert(`Team "${name}" created.`, 'success', 2000);
+      } catch (err) {
+        console.error('Create team failed', err);
+      }
+    }
+
     // Event bindings
     function initEvents() {
+      // Welcome banner
+      if (dom.btnHideWelcome) {
+        dom.btnHideWelcome.addEventListener('click', () => {
+          dom.welcomeBanner?.classList.add('hidden');
+          try { window.localStorage.setItem(welcomeHiddenKey, 'true'); } catch (e) {}
+        });
+      }
+
+      if (dom.btnStartQuickScan) {
+        dom.btnStartQuickScan.addEventListener('click', () => {
+          setScanMode('quick');
+          setCurrentStep(1);
+        });
+      }
+
+      if (dom.btnStartFullScan) {
+        dom.btnStartFullScan.addEventListener('click', () => {
+          setScanMode('full');
+          setCurrentStep(1);
+        });
+      }
+
+      // Mode selector
+      if (dom.modeQuickScan) {
+        dom.modeQuickScan.addEventListener('click', () => setScanMode('quick'));
+      }
+      if (dom.modeFullScan) {
+        dom.modeFullScan.addEventListener('click', () => setScanMode('full'));
+      }
+
+      // Step navigation
+      if (dom.btnStep1Next) {
+        dom.btnStep1Next.addEventListener('click', () => {
+          if (state.cpeList.length > 0) setCurrentStep(2);
+        });
+      }
+
+      if (dom.btnStep2Back) {
+        dom.btnStep2Back.addEventListener('click', () => setCurrentStep(1));
+      }
+
+      if (dom.btnStep2FullBack) {
+        dom.btnStep2FullBack.addEventListener('click', () => setCurrentStep(1));
+      }
+
       // Sidebar
       dom.searchInput?.addEventListener('input', () => {
         const query = (dom.searchInput.value || '').toLowerCase();
@@ -1153,19 +1423,7 @@
         renderSidebar();
       });
 
-      dom.newWatchBtn?.addEventListener('click', () => {
-        state.currentWatchId = null;
-        clearForm();
-        dom.form?.classList.remove('hidden');
-        renderSidebar();
-      });
-
-      dom.newProjectBtn?.addEventListener('click', async () => {
-        const name = prompt('Team name', 'New Team');
-        if (!name) return;
-        await api.createProject(name);
-        await api.getWatchlists();
-      });
+      dom.newProjectBtn?.addEventListener('click', openCreateTeamModal);
 
       dom.deleteSelectedBtn?.addEventListener('click', async () => {
         if (!state.selectedIds.size) return;
@@ -1185,12 +1443,13 @@
 
       dom.builderToggle?.addEventListener('click', () => {
         dom.builderBody?.classList.toggle('hidden');
-        dom.builderToggle.textContent = dom.builderBody?.classList.contains('hidden') ? 'Show' : 'Hide';
+        dom.builderToggle.textContent = dom.builderBody?.classList.contains('hidden') ? 'Show Builder' : 'Hide Builder';
       });
 
       dom.btnAddCpe?.addEventListener('click', () => {
         const cpe = buildCpe();
-        if (cpe && cpe !== 'cpe:2.3:o:*:*:*:*:*:*:*:*:*:*') addCpeToList(cpe);
+        if (cpe && !cpe.includes(':*:*:*:*:*:*:*:*:*:*')) addCpeToList(cpe);
+        else showAlert('Please fill in at least vendor and product fields.', 'warning');
       });
 
       dom.btnAddManualCpe?.addEventListener('click', () => {
@@ -1201,29 +1460,53 @@
         }
       });
 
-      // Schedule
+      dom.manualCpeInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const cpe = dom.manualCpeInput?.value?.trim();
+          if (cpe) {
+            addCpeToList(cpe);
+            dom.manualCpeInput.value = '';
+          }
+        }
+      });
+
+      dom.btnClearCpes?.addEventListener('click', () => {
+        if (confirm('Clear all CPEs from the list?')) {
+          state.cpeList = [];
+          renderCpeList();
+          updateFormCpes();
+        }
+      });
+
+      // Scan period buttons
       document.querySelectorAll('.scan-period-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-          document.querySelectorAll('.scan-period-btn').forEach((b) => b.classList.remove('active'));
+          const container = btn.closest('.card, .mb-4');
+          container?.querySelectorAll('.scan-period-btn').forEach((b) => b.classList.remove('active'));
           btn.classList.add('active');
           state.scanPeriod = btn.dataset.period;
         });
       });
 
-      dom.btnAddInterval?.addEventListener('click', openIntervalModal);
-      dom.btnCloseInterval?.addEventListener('click', closeIntervalModal);
-      dom.btnCancelInterval?.addEventListener('click', closeIntervalModal);
-      dom.btnConfirmInterval?.addEventListener('click', addIntervalFromModal);
+      // Quick scan
+      dom.btnQuickScan?.addEventListener('click', runQuickScan);
 
-      dom.btnSaveAndScan?.addEventListener('click', async () => {
+      // Full scan
+      dom.btnCreateTeamInline?.addEventListener('click', openCreateTeamModal);
+
+      dom.btnAddInterval?.addEventListener('click', openIntervalModal);
+
+      dom.btnSaveOnly?.addEventListener('click', async () => {
         await saveWatchlist();
-        const period = state.scanPeriod === 'custom' ? '24h' : state.scanPeriod;
-        await runCurrent(period);
       });
 
-      // Form
-      dom.btnSaveWatch?.addEventListener('click', saveWatchlist);
-      dom.btnDeleteWatch?.addEventListener('click', deleteCurrentWatch);
+      dom.btnSaveAndScan?.addEventListener('click', async () => {
+        const saved = await saveWatchlist();
+        if (saved) {
+          await runWatchlistScan(state.scanPeriod === 'custom' ? '7d' : state.scanPeriod);
+        }
+      });
 
       // Filters
       dom.btnFilter?.addEventListener('click', applyFilters);
@@ -1347,12 +1630,24 @@
       dom.btnSaveSettings?.addEventListener('click', saveSettingsFromModal);
       dom.settingsModal?.querySelector('.modal__backdrop')?.addEventListener('click', closeSettingsModal);
 
-      // Interval modal backdrop
+      // Interval modal
+      dom.btnCloseInterval?.addEventListener('click', closeIntervalModal);
+      dom.btnCancelInterval?.addEventListener('click', closeIntervalModal);
+      dom.btnConfirmInterval?.addEventListener('click', addIntervalFromModal);
       dom.intervalModal?.querySelector('.modal__backdrop')?.addEventListener('click', closeIntervalModal);
+
+      // Create team modal
+      dom.btnCloseCreateTeam?.addEventListener('click', closeCreateTeamModal);
+      dom.btnCancelCreateTeam?.addEventListener('click', closeCreateTeamModal);
+      dom.btnConfirmCreateTeam?.addEventListener('click', createTeamFromModal);
+      dom.createTeamModal?.querySelector('.modal__backdrop')?.addEventListener('click', closeCreateTeamModal);
+      dom.newTeamName?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') createTeamFromModal();
+      });
 
       // Keyboard shortcuts
       window.addEventListener('keydown', (e) => {
-        if (e.target?.tagName === 'INPUT' || e.target?.tagName === 'TEXTAREA') return;
+        if (e.target?.tagName === 'INPUT' || e.target?.tagName === 'TEXTAREA' || e.target?.tagName === 'SELECT') return;
 
         if (e.key === 'ArrowLeft' && state.detailIndex > 0) {
           showDetails(state.detailIndex - 1);
@@ -1361,11 +1656,17 @@
         } else if (e.key === 'Escape') {
           closeSettingsModal();
           closeIntervalModal();
+          closeCreateTeamModal();
         }
       });
     }
 
     function init() {
+      // Hide welcome banner if previously dismissed
+      if (welcomeHidden && dom.welcomeBanner) {
+        dom.welcomeBanner.classList.add('hidden');
+      }
+
       renderSidebar();
       populateProjectSelect();
       renderCpeList();
@@ -1373,18 +1674,15 @@
       updateBuilderOutput();
       initEvents();
 
-      if (state.currentWatchId) {
-        const watch = findWatchlist(state.currentWatchId);
-        if (watch) fillForm(watch);
-        else clearForm();
-      } else {
-        clearForm();
-      }
+      // Set initial mode and step
+      setScanMode('quick');
+      setCurrentStep(1);
 
+      // Apply initial filters
       applyFilters();
 
       if (state.windowLabel && dom.windowLabel) {
-        dom.windowLabel.textContent = `Window: ${state.windowLabel}`;
+        dom.windowLabel.textContent = state.windowLabel;
       }
     }
 

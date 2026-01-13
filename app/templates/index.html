@@ -20,7 +20,6 @@
               </svg>
               <span class="font-semibold text-lg">CPExVTOPS</span>
             </div>
-            <button id="btnNewWatch" class="btn btn--primary">New</button>
           </div>
 
           <div class="mt-3 flex gap-2">
@@ -32,15 +31,6 @@
               </svg>
             </div>
             <button id="selectMode" class="btn btn--ghost">Select</button>
-            <button
-              id="btnDeleteSelected"
-              class="btn btn--danger hidden"
-              title="Delete selected watchlists"
-              type="button"
-            >
-              Delete
-            </button>
-            <button id="btnNewProject" class="btn btn--ghost" title="Create team">New team</button>
           </div>
 
           <div class="mt-2 flex items-center gap-3 text-xs text-slate-600">
@@ -50,9 +40,26 @@
             </label>
             <span class="text-slate-300">|</span>
             <span id="selectedCount" class="text-slate-500">0 Selected</span>
+            <button
+              id="btnDeleteSelected"
+              class="btn btn--danger hidden ml-auto"
+              title="Delete selected"
+              type="button"
+            >
+              Delete
+            </button>
           </div>
         </div>
-        <div id="projectsContainer" class="p-3 space-y-3 overflow-y-auto flex-1"></div>
+
+        <!-- Saved Watchlists -->
+        <div class="p-3">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Saved Watchlists</h3>
+            <button id="btnNewProject" class="btn btn--ghost text-xs" title="Create new team">+ Team</button>
+          </div>
+        </div>
+        <div id="projectsContainer" class="px-3 pb-3 space-y-3 overflow-y-auto flex-1"></div>
+
         <div class="sidebar__footer">
           <button id="btnSettings" class="settings-btn">
             <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
@@ -68,224 +75,458 @@
       <main class="flex-1 p-6 overflow-y-auto">
         <div id="alerts" class="space-y-2 mb-4"></div>
 
+        <!-- Welcome / Getting Started Banner -->
+        <div id="welcomeBanner" class="welcome-banner mb-6">
+          <div class="flex items-start gap-4">
+            <div class="welcome-banner__icon">
+              <svg viewBox="0 0 24 24" class="h-8 w-8" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="M9 12l2 2 4-4"/>
+              </svg>
+            </div>
+            <div class="flex-1">
+              <h1 class="text-xl font-bold text-slate-800 mb-1">Vulnerability Scanner</h1>
+              <p class="text-slate-600 text-sm mb-3">Search for CVEs affecting your software using CPE (Common Platform Enumeration) strings. Choose between a quick one-time scan or create a watchlist for continuous monitoring.</p>
+              <div class="flex gap-2">
+                <button id="btnStartQuickScan" class="btn btn--primary">
+                  <svg viewBox="0 0 24 24" class="h-4 w-4 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                  Quick Scan
+                </button>
+                <button id="btnStartFullScan" class="btn btn--ghost">
+                  <svg viewBox="0 0 24 24" class="h-4 w-4 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                  Create Watchlist
+                </button>
+              </div>
+            </div>
+            <button id="btnHideWelcome" class="text-slate-400 hover:text-slate-600" title="Hide">
+              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Scan Mode Selector -->
+        <div id="scanModeSelector" class="card mb-6">
+          <div class="flex items-center gap-4 mb-4">
+            <h2 class="text-lg font-semibold">Choose Scan Mode</h2>
+            <div class="mode-toggle">
+              <button id="modeQuickScan" class="mode-toggle__btn mode-toggle__btn--active" data-mode="quick">
+                <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                Quick Scan
+              </button>
+              <button id="modeFullScan" class="mode-toggle__btn" data-mode="full">
+                <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                Full Scan + Watchlist
+              </button>
+            </div>
+          </div>
+
+          <!-- Mode Description -->
+          <div id="modeDescription" class="mode-description">
+            <div id="quickModeDesc" class="mode-description__content">
+              <div class="mode-description__icon mode-description__icon--quick">
+                <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-semibold text-slate-800">Quick Scan Mode</h3>
+                <p class="text-sm text-slate-600">Run an immediate one-time scan without saving. Perfect for quick vulnerability checks.</p>
+                <ul class="text-xs text-slate-500 mt-2 space-y-1">
+                  <li>&#8226; Enter CPE string or build one</li>
+                  <li>&#8226; Select time range</li>
+                  <li>&#8226; Get instant results</li>
+                </ul>
+              </div>
+            </div>
+            <div id="fullModeDesc" class="mode-description__content hidden">
+              <div class="mode-description__icon mode-description__icon--full">
+                <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-semibold text-slate-800">Full Scan + Watchlist Mode</h3>
+                <p class="text-sm text-slate-600">Create a saved watchlist with scheduling for continuous monitoring.</p>
+                <ul class="text-xs text-slate-500 mt-2 space-y-1">
+                  <li>&#8226; Name your team/project</li>
+                  <li>&#8226; Add multiple CPE strings</li>
+                  <li>&#8226; Set up scheduled scans</li>
+                  <li>&#8226; Track new vulnerabilities over time</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <!-- Left Column - CPE Configuration -->
           <div class="lg:col-span-1 space-y-4">
-            <!-- CPE String Generator -->
-            <div class="card" id="cpeBuilder">
-              <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-semibold">1. Generate CPE-String</h3>
-                <button id="builderToggle" class="link text-xs">Hide</button>
+
+            <!-- Progress Steps Indicator -->
+            <div class="steps-indicator">
+              <div class="step step--active" data-step="1">
+                <div class="step__number">1</div>
+                <div class="step__label">Build CPE</div>
               </div>
+              <div class="step__connector"></div>
+              <div class="step" data-step="2">
+                <div class="step__number">2</div>
+                <div class="step__label">Configure</div>
+              </div>
+              <div class="step__connector"></div>
+              <div class="step" data-step="3">
+                <div class="step__number">3</div>
+                <div class="step__label">Scan</div>
+              </div>
+            </div>
+
+            <!-- Step 1: CPE String Generator -->
+            <div class="card step-card step-card--active" id="step1Card" data-step="1">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="step-badge">Step 1</span>
+                  <h3 class="text-sm font-semibold">Build or Enter CPE String</h3>
+                </div>
+                <button id="builderToggle" class="link text-xs">Hide Builder</button>
+              </div>
+
+              <!-- Help Text -->
+              <div class="help-box mb-4">
+                <svg viewBox="0 0 24 24" class="h-4 w-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <path d="M12 16v-4m0-4h.01"></path>
+                </svg>
+                <p class="text-xs text-slate-600">A CPE (Common Platform Enumeration) string identifies software products. Example: <code class="text-indigo-600">cpe:2.3:a:apache:tomcat:9.0:*:*:*:*:*:*:*</code></p>
+              </div>
+
               <div id="builderBody">
                 <div class="builder-grid">
                   <div>
                     <label for="b_part" class="filter-label">Part <span class="text-red-500">*</span></label>
                     <select id="b_part" class="filter-input">
                       <option value="a">a (application)</option>
-                      <option value="o" selected>o (operating system)</option>
+                      <option value="o">o (operating system)</option>
                       <option value="h">h (hardware)</option>
                     </select>
                   </div>
                   <div>
                     <label for="b_vendor" class="filter-label">Vendor <span class="text-red-500">*</span></label>
-                    <input id="b_vendor" class="filter-input" placeholder="microsoft" />
+                    <input id="b_vendor" class="filter-input" placeholder="e.g. apache, microsoft" />
                   </div>
                   <div>
                     <label for="b_product" class="filter-label">Product <span class="text-red-500">*</span></label>
-                    <input id="b_product" class="filter-input" placeholder="windows_11" />
+                    <input id="b_product" class="filter-input" placeholder="e.g. tomcat, windows" />
                   </div>
                   <div>
-                    <label for="b_version" class="filter-label">Version <span class="text-red-500">*</span></label>
-                    <input id="b_version" class="filter-input" placeholder="23h2" />
+                    <label for="b_version" class="filter-label">Version</label>
+                    <input id="b_version" class="filter-input" placeholder="e.g. 9.0, 10" />
                   </div>
                   <div>
                     <label for="b_update" class="filter-label">Update</label>
-                    <input id="b_update" class="filter-input" placeholder="*" />
+                    <input id="b_update" class="filter-input" placeholder="* (any)" />
                   </div>
                   <div>
-                    <label for="b_edition" class="filter-label">Edition <span class="text-slate-400 text-xs">(deprecated)</span></label>
-                    <input id="b_edition" class="filter-input" placeholder="*" />
+                    <label for="b_edition" class="filter-label">Edition</label>
+                    <input id="b_edition" class="filter-input" placeholder="* (any)" />
                   </div>
                   <div>
                     <label for="b_language" class="filter-label">Language</label>
-                    <input id="b_language" class="filter-input" placeholder="*" />
+                    <input id="b_language" class="filter-input" placeholder="* (any)" />
                   </div>
                   <div>
-                    <label for="b_sw" class="filter-label">Sw. Ed.</label>
-                    <input id="b_sw" class="filter-input" placeholder="*" />
+                    <label for="b_sw" class="filter-label">Sw. Edition</label>
+                    <input id="b_sw" class="filter-input" placeholder="* (any)" />
                   </div>
                   <div>
                     <label for="b_tsw" class="filter-label">Target Sw.</label>
-                    <input id="b_tsw" class="filter-input" placeholder="*" />
+                    <input id="b_tsw" class="filter-input" placeholder="* (any)" />
                   </div>
                   <div>
                     <label for="b_thw" class="filter-label">Target Hw.</label>
-                    <input id="b_thw" class="filter-input" placeholder="*" />
+                    <input id="b_thw" class="filter-input" placeholder="* (any)" />
                   </div>
                   <div>
                     <label for="b_other" class="filter-label">Other</label>
-                    <input id="b_other" class="filter-input" placeholder="*" />
+                    <input id="b_other" class="filter-input" placeholder="* (any)" />
                   </div>
                 </div>
 
-                <!-- CPE List -->
-                <div class="mt-4">
-                  <label class="filter-label">List:</label>
-                  <div id="cpeList" class="cpe-list">
-                    <div class="text-xs text-slate-400 italic">No CPEs added yet</div>
+                <div class="mt-3 p-3 bg-slate-50 rounded-lg border">
+                  <label class="filter-label mb-1">Generated CPE String:</label>
+                  <div class="flex items-center gap-2">
+                    <code id="b_output" class="builder-output flex-1">cpe:2.3:a:*:*:*:*:*:*:*:*:*:*</code>
+                    <button id="b_add" class="btn btn--primary" title="Add to list">
+                      <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                      Add
+                    </button>
                   </div>
                 </div>
+              </div>
 
-                <div class="mt-3 flex items-center gap-2">
-                  <code id="b_output" class="builder-output flex-1">cpe:2.3:o:*:*:*:*:*:*:*:*:*:*</code>
-                  <button id="b_add" class="btn btn--primary">Apply</button>
+              <!-- Manual CPE Input -->
+              <div class="mt-4 pt-4 border-t">
+                <label class="filter-label mb-2">Or paste CPE string directly:</label>
+                <div class="flex gap-2">
+                  <input id="manualCpeInput" class="filter-input flex-1" placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*" />
+                  <button id="btnAddManualCpe" class="btn btn--ghost">Add</button>
                 </div>
+              </div>
 
-                <div class="mt-3 flex gap-2">
-                  <input id="manualCpeInput" class="filter-input flex-1" placeholder="Insert CPE manually" />
-                  <button id="btnAddManualCpe" class="btn btn--ghost">Add to list</button>
+              <!-- CPE List -->
+              <div class="mt-4">
+                <div class="flex items-center justify-between mb-2">
+                  <label class="filter-label">CPE List (<span id="cpeListCount">0</span>):</label>
+                  <button id="btnClearCpes" class="text-xs text-red-500 hover:text-red-700 hidden">Clear All</button>
                 </div>
+                <div id="cpeList" class="cpe-list">
+                  <div class="empty-state">
+                    <svg viewBox="0 0 24 24" class="h-8 w-8 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    <p class="text-xs text-slate-400">No CPEs added yet</p>
+                    <p class="text-xs text-slate-400">Build or paste a CPE above</p>
+                  </div>
+                </div>
+              </div>
 
-                <div id="builderSuggestions" class="builder-suggestions hidden mt-2"></div>
+              <div class="mt-4 flex justify-end">
+                <button id="btnStep1Next" class="btn btn--primary" disabled>
+                  Continue to Step 2
+                  <svg viewBox="0 0 24 24" class="h-4 w-4 ml-1" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </button>
               </div>
             </div>
 
-            <!-- Time & Schedule Section -->
-            <div class="card" id="scheduleSection">
-              <h3 class="text-sm font-semibold mb-3">2. Time & Schedule</h3>
+            <!-- Step 2: Configuration (Quick Scan) -->
+            <div class="card step-card" id="step2CardQuick" data-step="2" data-mode="quick">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="step-badge">Step 2</span>
+                <h3 class="text-sm font-semibold">Configure Quick Scan</h3>
+              </div>
 
-              <div class="mb-3">
-                <label class="filter-label">Scan: last</label>
-                <div class="flex gap-2 mt-1">
-                  <button class="scan-period-btn active" data-period="7d">7d</button>
-                  <button class="scan-period-btn" data-period="14d">14d</button>
-                  <button class="scan-period-btn" data-period="30d">30d</button>
-                  <button class="scan-period-btn" data-period="custom">Custom</button>
+              <div class="mb-4">
+                <label class="filter-label mb-2">Time Range:</label>
+                <div class="flex flex-wrap gap-2">
+                  <button class="scan-period-btn" data-period="24h">Last 24h</button>
+                  <button class="scan-period-btn active" data-period="7d">Last 7 days</button>
+                  <button class="scan-period-btn" data-period="14d">Last 14 days</button>
+                  <button class="scan-period-btn" data-period="30d">Last 30 days</button>
+                  <button class="scan-period-btn" data-period="90d">Last 90 days</button>
                 </div>
               </div>
 
-              <div class="mb-3">
-                <label class="filter-label">Intervals:</label>
-                <div id="scheduleIntervals" class="space-y-2 mt-1">
+              <div class="mb-4">
+                <label class="filter-label mb-2">Scan Options:</label>
+                <div class="space-y-2">
+                  <label class="flex items-center gap-2 text-sm">
+                    <input id="quickOptKev" type="checkbox" class="h-4 w-4" />
+                    <span>KEV only (CISA Known Exploited Vulnerabilities)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="flex gap-2">
+                <button id="btnStep2Back" class="btn btn--ghost flex-1">
+                  <svg viewBox="0 0 24 24" class="h-4 w-4 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                  </svg>
+                  Back
+                </button>
+                <button id="btnQuickScan" class="cta cta--accent flex-1">
+                  <svg viewBox="0 0 24 24" class="h-5 w-5 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                  Run Quick Scan
+                </button>
+              </div>
+            </div>
+
+            <!-- Step 2: Configuration (Full Scan / Watchlist) -->
+            <div class="card step-card hidden" id="step2CardFull" data-step="2" data-mode="full">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="step-badge">Step 2</span>
+                <h3 class="text-sm font-semibold">Configure Watchlist</h3>
+              </div>
+
+              <!-- Team/Project Selection -->
+              <div class="mb-4">
+                <label class="filter-label" for="formProject">Team / Project <span class="text-red-500">*</span></label>
+                <div class="flex gap-2">
+                  <select id="formProject" class="filter-input flex-1"></select>
+                  <button id="btnCreateTeamInline" class="btn btn--ghost" title="Create new team">
+                    <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                  </button>
+                </div>
+                <p class="text-xs text-slate-500 mt-1">Group related watchlists under a team</p>
+              </div>
+
+              <!-- Watchlist Name -->
+              <div class="mb-4">
+                <label class="filter-label" for="formName">Watchlist Name <span class="text-red-500">*</span></label>
+                <input id="formName" class="filter-input" placeholder="e.g. Production Servers, Web Stack" />
+              </div>
+
+              <!-- Comments -->
+              <div class="mb-4">
+                <label class="filter-label" for="formComments">Notes / Comments</label>
+                <textarea id="formComments" rows="2" class="filter-input" placeholder="Optional notes about this watchlist..."></textarea>
+              </div>
+
+              <input type="hidden" id="formWatchId" />
+              <input type="hidden" id="formCpes" />
+
+              <!-- Scan Options -->
+              <div class="mb-4">
+                <label class="filter-label mb-2">Scan Options:</label>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                  <label class="flex items-center gap-2"><input id="optNoRejected" type="checkbox" class="h-4 w-4" checked />Exclude rejected</label>
+                  <label class="flex items-center gap-2"><input id="optHasKev" type="checkbox" class="h-4 w-4" />KEV only</label>
+                </div>
+              </div>
+
+              <!-- Schedule Section -->
+              <div class="mb-4 p-3 bg-slate-50 rounded-lg border">
+                <div class="flex items-center justify-between mb-2">
+                  <label class="filter-label">Scheduled Scans:</label>
+                  <button id="btnAddInterval" class="text-xs text-indigo-600 hover:text-indigo-800">+ Add Time</button>
+                </div>
+                <div id="scheduleIntervals" class="space-y-2">
                   <!-- Schedule intervals will be rendered here -->
                 </div>
-                <button id="btnAddInterval" class="btn btn--ghost text-xs mt-2">+ Add interval</button>
+                <p class="text-xs text-slate-500 mt-2">Scans will run automatically at these times (UTC)</p>
               </div>
 
-              <div class="grid grid-cols-2 gap-3 mb-4">
-                <div>
-                  <label class="filter-label">From:</label>
-                  <input id="scanFromDate" type="date" class="filter-input" />
+              <!-- Time Range -->
+              <div class="mb-4">
+                <label class="filter-label mb-2">Initial Scan Range:</label>
+                <div class="flex flex-wrap gap-2">
+                  <button class="scan-period-btn" data-period="24h">24h</button>
+                  <button class="scan-period-btn active" data-period="7d">7 days</button>
+                  <button class="scan-period-btn" data-period="14d">14 days</button>
+                  <button class="scan-period-btn" data-period="30d">30 days</button>
+                  <button class="scan-period-btn" data-period="90d">90 days</button>
                 </div>
-                <div>
-                  <label class="filter-label">To:</label>
-                  <input id="scanToDate" type="date" class="filter-input" />
-                </div>
               </div>
 
-              <button id="btnSaveAndScan" class="cta cta--accent w-full">Save & Scan</button>
-            </div>
-
-            <!-- Team/Watch Form (hidden by default) -->
-            <form id="watchForm" class="card space-y-3 hidden">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" id="formWatchId" />
-              <h2 class="text-base font-semibold mb-1 flex items-center justify-between">
-                <span id="formTitle">Create / edit team</span>
-                <span id="formProjectLabel" class="text-xs text-slate-500"></span>
-              </h2>
-
-              <label class="field-label" for="formProject">Team</label>
-              <select id="formProject" class="field-input"></select>
-
-              <label class="field-label" for="formName">Name</label>
-              <input id="formName" class="field-input" placeholder="e.g., SEC-OP" />
-
-              <label class="field-label" for="formCpes">CPEs</label>
-              <textarea id="formCpes" rows="4" class="field-input" placeholder="CPEs will be added from the builder above"></textarea>
-
-              <label class="field-label" for="formComments">Comments</label>
-              <textarea id="formComments" rows="3" class="field-input" placeholder="Add notes about this team..."></textarea>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <label class="flex items-center gap-2"><input id="optNoRejected" type="checkbox" class="h-4 w-4" checked />No rejected</label>
-                <label class="flex items-center gap-2"><input id="optIsVulnerable" type="checkbox" class="h-4 w-4" />isVulnerable</label>
-                <label class="flex items-center gap-2"><input id="optHasKev" type="checkbox" class="h-4 w-4" />Has KEV</label>
-                <label class="flex items-center gap-2"><input id="optInsecure" type="checkbox" class="h-4 w-4" />Skip TLS verification</label>
-              </div>
-
-              <details class="mt-2">
-                <summary class="text-sm font-semibold cursor-pointer">Advanced options</summary>
-                <div class="mt-2 space-y-2 text-sm">
+              <!-- Advanced Options (Collapsed) -->
+              <details class="mb-4">
+                <summary class="text-sm font-medium cursor-pointer text-slate-600 hover:text-slate-800">Advanced Options</summary>
+                <div class="mt-3 space-y-3 pl-4 border-l-2 border-slate-200">
                   <label class="block">
-                    <span class="block mb-1">HTTP proxy</span>
-                    <input id="optHttpProxy" class="field-input" placeholder="http://user:pass@proxy:8080" />
+                    <span class="filter-label">HTTP Proxy</span>
+                    <input id="optHttpProxy" class="filter-input" placeholder="http://proxy:8080" />
                   </label>
                   <label class="block">
-                    <span class="block mb-1">HTTPS proxy</span>
-                    <input id="optHttpsProxy" class="field-input" placeholder="https://user:pass@proxy:8443" />
+                    <span class="filter-label">HTTPS Proxy</span>
+                    <input id="optHttpsProxy" class="filter-input" placeholder="https://proxy:8443" />
                   </label>
                   <label class="block">
-                    <span class="block mb-1">CA bundle path</span>
-                    <input id="optCaBundle" class="field-input" placeholder="/path/to/custom.pem" />
+                    <span class="filter-label">CA Bundle Path</span>
+                    <input id="optCaBundle" class="filter-input" placeholder="/path/to/ca-bundle.crt" />
                   </label>
                   <label class="block">
-                    <span class="block mb-1">Timeout (seconds)</span>
-                    <input id="optTimeout" type="number" min="1" class="field-input" placeholder="60" />
+                    <span class="filter-label">Timeout (seconds)</span>
+                    <input id="optTimeout" type="number" min="10" max="300" class="filter-input" placeholder="60" />
+                  </label>
+                  <label class="flex items-center gap-2 text-sm">
+                    <input id="optInsecure" type="checkbox" class="h-4 w-4" />
+                    <span>Skip TLS verification (insecure)</span>
+                  </label>
+                  <label class="flex items-center gap-2 text-sm">
+                    <input id="optIsVulnerable" type="checkbox" class="h-4 w-4" />
+                    <span>isVulnerable filter</span>
                   </label>
                 </div>
               </details>
 
-              <div id="formWarnings" class="text-xs text-amber-600"></div>
-
               <div class="flex gap-2">
-                <button id="btnSaveWatch" class="btn btn--primary flex-1" type="button">Save Team</button>
-                <button id="btnDeleteWatch" class="btn btn--danger" type="button">Delete</button>
+                <button id="btnStep2FullBack" class="btn btn--ghost">
+                  <svg viewBox="0 0 24 24" class="h-4 w-4 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                  </svg>
+                  Back
+                </button>
+                <button id="btnSaveOnly" class="btn btn--ghost flex-1">Save Only</button>
+                <button id="btnSaveAndScan" class="cta cta--accent flex-1">
+                  <svg viewBox="0 0 24 24" class="h-5 w-5 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                    <polyline points="17 21 17 13 7 13 7 21"/>
+                    <polyline points="7 3 7 8 15 8"/>
+                  </svg>
+                  Save & Scan
+                </button>
               </div>
-            </form>
+            </div>
           </div>
 
           <!-- Right Column - Vulnerability Results -->
-          <div class="lg:col-span-2 space-y-3">
+          <div class="lg:col-span-2 space-y-4">
             <!-- Filter Bar -->
             <div id="filtersBox" class="card">
               <div class="flex flex-wrap gap-3 items-end">
                 <div>
-                  <label for="f_cve" class="filter-label">CVE</label>
+                  <label for="f_cve" class="filter-label">CVE ID</label>
                   <input id="f_cve" class="filter-input w-32" placeholder="CVE-2025-..." />
                 </div>
                 <div>
-                  <label for="f_epss" class="filter-label">EPSS</label>
+                  <label for="f_epss" class="filter-label">EPSS Score</label>
                   <div class="flex items-center gap-1">
-                    <span class="text-xs text-slate-500">&gt;</span>
-                    <input id="f_epss" type="number" min="0" max="100" step="1" class="filter-input w-20" placeholder="0" aria-label="EPSS threshold percentage" />
+                    <span class="text-xs text-slate-500">&ge;</span>
+                    <input id="f_epss" type="number" min="0" max="100" step="1" class="filter-input w-20" placeholder="0" />
                     <span class="text-xs text-slate-500">%</span>
                   </div>
                 </div>
                 <div>
-                  <label for="f_score" class="filter-label">CVSS</label>
+                  <label for="f_score" class="filter-label">CVSS Score</label>
                   <div class="flex items-center gap-1">
-                    <span class="text-xs text-slate-500">&gt;</span>
-                    <input id="f_score" type="number" min="0" max="10" step="0.1" class="filter-input w-20" placeholder="0" aria-label="CVSS threshold score" />
+                    <span class="text-xs text-slate-500">&ge;</span>
+                    <input id="f_score" type="number" min="0" max="10" step="0.1" class="filter-input w-20" placeholder="0" />
                   </div>
                 </div>
                 <div>
-                  <label for="f_kev" class="filter-label">KEV</label>
+                  <label for="f_kev" class="filter-label">KEV Status</label>
                   <select id="f_kev" class="filter-input">
                     <option value="">All</option>
-                    <option value="yes">KEV only</option>
+                    <option value="yes">KEV Only</option>
                     <option value="no">Non-KEV</option>
                   </select>
                 </div>
-                <button id="btnFilter" class="btn btn--primary">Filter</button>
-                <button id="f_clear" class="link text-xs">Clear filter</button>
+                <button id="btnFilter" class="btn btn--primary">Apply</button>
+                <button id="f_clear" class="link text-xs">Clear</button>
               </div>
 
               <!-- Quick Date Filters & Status -->
               <div class="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t">
                 <div class="relative flex-1">
-                  <input id="f_text" class="search" placeholder="Search CVE, description, CPE..." />
+                  <input id="f_text" class="search" placeholder="Search CVE ID, description, CPE..." />
                   <svg viewBox="0 0 24 24" class="search__icon" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="11" cy="11" r="8"></circle>
                     <path d="m21 21-4.3-4.3"></path>
@@ -293,9 +534,9 @@
                 </div>
                 <div class="flex gap-1">
                   <button class="date-filter-btn" data-days="0">Today</button>
-                  <button class="date-filter-btn" data-days="14">14d</button>
+                  <button class="date-filter-btn" data-days="7">7d</button>
                   <button class="date-filter-btn" data-days="30">30d</button>
-                  <button class="date-filter-btn active" data-days="custom">custom</button>
+                  <button class="date-filter-btn active" data-days="custom">All</button>
                 </div>
                 <div class="flex items-center gap-3 ml-auto">
                   <label class="flex items-center gap-1 text-sm">
@@ -318,24 +559,65 @@
             <div class="card">
               <div class="flex items-center justify-between px-2 mb-3">
                 <div>
-                  <div class="text-base font-semibold">
-                    Results (<span id="resCount">0</span>)
+                  <div class="text-base font-semibold flex items-center gap-2">
+                    Scan Results
+                    <span class="results-count" id="resCount">0</span>
                   </div>
-                  <div class="text-xs text-slate-500" id="windowLabel">Window: -</div>
+                  <div class="text-xs text-slate-500" id="windowLabel">No scan performed yet</div>
                 </div>
                 <div class="flex items-center gap-2">
-                  <button id="btnExportCsv" class="btn btn--ghost text-xs" type="button">Export CSV</button>
-                  <button id="btnExportNdjson" class="btn btn--ghost text-xs" type="button">Export NDJSON</button>
+                  <button id="btnExportCsv" class="btn btn--ghost text-xs" type="button" disabled>
+                    <svg viewBox="0 0 24 24" class="h-4 w-4 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    CSV
+                  </button>
+                  <button id="btnExportNdjson" class="btn btn--ghost text-xs" type="button" disabled>
+                    <svg viewBox="0 0 24 24" class="h-4 w-4 mr-1" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    JSON
+                  </button>
                 </div>
               </div>
-              <div class="overflow-x-auto">
+
+              <!-- Empty State -->
+              <div id="resultsEmptyState" class="results-empty">
+                <svg viewBox="0 0 24 24" class="h-16 w-16 text-slate-300 mx-auto mb-4" fill="none" stroke="currentColor" stroke-width="1">
+                  <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                <h3 class="text-lg font-semibold text-slate-600 mb-2">No Results Yet</h3>
+                <p class="text-sm text-slate-500 mb-4">Add CPE strings and run a scan to find vulnerabilities</p>
+                <div class="text-xs text-slate-400">
+                  <p>Quick Start:</p>
+                  <ol class="list-decimal list-inside mt-2 space-y-1">
+                    <li>Enter a CPE string (e.g., <code class="text-indigo-500">cpe:2.3:a:apache:tomcat:*:*:*:*:*:*:*:*</code>)</li>
+                    <li>Click "Add" to add it to your list</li>
+                    <li>Choose a time range and click "Run Quick Scan"</li>
+                  </ol>
+                </div>
+              </div>
+
+              <!-- Loading State -->
+              <div id="resultsLoading" class="results-loading hidden">
+                <div class="loading-spinner"></div>
+                <p class="text-slate-600 mt-4">Scanning for vulnerabilities...</p>
+                <p class="text-sm text-slate-500" id="loadingStatus">Connecting to API...</p>
+              </div>
+
+              <!-- Results Table -->
+              <div id="resultsTableWrapper" class="overflow-x-auto hidden">
                 <table id="resTable" class="results-table">
                   <thead>
                     <tr>
-                      <th class="sortable" data-k="id">CVE</th>
-                      <th>CISA KEV Info</th>
-                      <th class="sortable" data-k="pub">Published Date</th>
-                      <th class="sortable" data-k="publisher">Publisher</th>
+                      <th class="sortable" data-k="id">CVE ID</th>
+                      <th>KEV</th>
+                      <th class="sortable" data-k="pub">Published</th>
+                      <th class="sortable" data-k="publisher">Source</th>
                       <th>Description</th>
                       <th class="sortable" data-k="score">CVSS</th>
                       <th class="sortable" data-k="epss">EPSS</th>
@@ -344,40 +626,70 @@
                   <tbody id="resBody"></tbody>
                 </table>
               </div>
-              <div id="tablePagination" class="flex items-center justify-center gap-2 py-3 border-t">
-                <button id="btnPrevPage" class="btn btn--ghost text-xs">&larr;</button>
+              <div id="tablePagination" class="flex items-center justify-center gap-2 py-3 border-t hidden">
+                <button id="btnPrevPage" class="btn btn--ghost text-xs">&larr; Previous</button>
                 <span id="pageInfo" class="text-xs text-slate-500">Page 1 of 1</span>
-                <button id="btnNextPage" class="btn btn--ghost text-xs">&rarr;</button>
+                <button id="btnNextPage" class="btn btn--ghost text-xs">Next &rarr;</button>
               </div>
             </div>
 
             <!-- Detail Panel -->
             <div class="card" id="detailPanel" hidden>
-              <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center justify-between mb-3 pb-3 border-b">
                 <div>
-                  <div class="text-lg font-semibold" id="d_cve"></div>
-                  <div class="text-xs text-slate-500" id="d_meta"></div>
-                  <div class="text-xs text-slate-500" id="d_matched"></div>
+                  <div class="text-lg font-bold text-indigo-700 flex items-center gap-2" id="d_cve">
+                    <!-- CVE ID here -->
+                  </div>
+                  <div class="text-xs text-slate-500 mt-1" id="d_meta"></div>
                 </div>
                 <div class="flex items-center gap-2">
-                  <button id="btnPrev" class="btn btn--ghost">&larr; Prev</button>
-                  <button id="btnNext" class="btn btn--ghost">Next &rarr;</button>
-                  <a id="d_link" target="_blank" class="btn btn--primary">Open on NVD</a>
-                  <button id="btnCopyJson" class="btn btn--ghost" type="button">Copy JSON</button>
-                  <button id="btnMarkMitigated" class="btn btn--ghost text-green-600" type="button">Mark Mitigated</button>
+                  <button id="btnPrev" class="btn btn--ghost text-sm">&larr;</button>
+                  <button id="btnNext" class="btn btn--ghost text-sm">&rarr;</button>
+                  <a id="d_link" target="_blank" class="btn btn--primary text-sm">View on NVD</a>
+                  <button id="btnCopyJson" class="btn btn--ghost text-sm" type="button">Copy JSON</button>
+                  <button id="btnMarkMitigated" class="btn btn--ghost text-green-600 text-sm" type="button">Mark Mitigated</button>
                 </div>
               </div>
-              <div class="prose max-w-none">
-                <p id="d_desc" class="whitespace-pre-wrap"></p>
-                <div id="d_cwes" class="text-sm text-slate-600"></div>
-                <div id="d_kev" class="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg hidden">
-                  <div class="font-medium text-red-700">CISA KEV Information</div>
-                  <div id="d_kev_details" class="text-sm text-red-600"></div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div class="detail-stat">
+                  <span class="detail-stat__label">CVSS Score</span>
+                  <span class="detail-stat__value" id="d_cvss">-</span>
                 </div>
-                <div id="d_refs" class="mt-2 text-sm">
-                  <div class="font-medium">References</div>
-                  <ul id="d_refs_list" class="list-disc pl-5"></ul>
+                <div class="detail-stat">
+                  <span class="detail-stat__label">EPSS Score</span>
+                  <span class="detail-stat__value" id="d_epss">-</span>
                 </div>
+                <div class="detail-stat">
+                  <span class="detail-stat__label">Severity</span>
+                  <span class="detail-stat__value" id="d_severity">-</span>
+                </div>
+              </div>
+
+              <div class="mb-4">
+                <h4 class="text-sm font-semibold text-slate-700 mb-2">Description</h4>
+                <p id="d_desc" class="text-sm text-slate-600 whitespace-pre-wrap"></p>
+              </div>
+
+              <div class="text-xs text-slate-500 mb-4" id="d_matched"></div>
+
+              <div id="d_cwes" class="mb-4"></div>
+
+              <div id="d_kev" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg hidden">
+                <div class="font-semibold text-red-700 flex items-center gap-2 mb-2">
+                  <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                  CISA Known Exploited Vulnerability
+                </div>
+                <div id="d_kev_details" class="text-sm text-red-600 space-y-1"></div>
+              </div>
+
+              <div id="d_refs" class="mb-4">
+                <h4 class="text-sm font-semibold text-slate-700 mb-2">References</h4>
+                <ul id="d_refs_list" class="text-sm space-y-1 max-h-40 overflow-y-auto"></ul>
               </div>
             </div>
           </div>
@@ -397,15 +709,15 @@
           <div>
             <label class="field-label">Default Scan Schedule</label>
             <input id="settingScanTimes" class="field-input" placeholder="07:30,12:30,16:00,19:30" />
-            <p class="text-xs text-slate-500 mt-1">Comma-separated times in HH:MM format</p>
+            <p class="text-xs text-slate-500 mt-1">Comma-separated times in HH:MM format (UTC)</p>
           </div>
           <div>
             <label class="field-label">Default CVSS Threshold</label>
-            <input id="settingCvssThreshold" type="number" min="0" max="10" step="0.1" class="field-input" placeholder="7.0" />
+            <input id="settingCvssThreshold" type="number" min="0" max="10" step="0.1" class="field-input" placeholder="0" />
           </div>
           <div>
             <label class="field-label">Default EPSS Threshold (%)</label>
-            <input id="settingEpssThreshold" type="number" min="0" max="100" step="1" class="field-input" placeholder="10" />
+            <input id="settingEpssThreshold" type="number" min="0" max="100" step="1" class="field-input" placeholder="0" />
           </div>
           <div class="flex items-center gap-2">
             <input id="settingAutoRefresh" type="checkbox" class="h-4 w-4" />
@@ -414,7 +726,7 @@
         </div>
         <div class="flex justify-end gap-2 mt-6">
           <button id="btnCancelSettings" class="btn btn--ghost">Cancel</button>
-          <button id="btnSaveSettings" class="btn btn--primary">Save Settings</button>
+          <button id="btnSaveSettings" class="btn btn--primary">Save</button>
         </div>
       </div>
     </div>
@@ -424,28 +736,39 @@
       <div class="modal__backdrop"></div>
       <div class="modal__content modal__content--sm">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold">Add Scan Interval</h2>
+          <h2 class="text-lg font-semibold">Add Scheduled Scan</h2>
           <button id="btnCloseInterval" class="text-slate-400 hover:text-slate-600">&times;</button>
         </div>
         <div class="space-y-4">
           <div>
-            <label class="field-label">Time (HH:MM)</label>
+            <label class="field-label">Time (UTC)</label>
             <input id="intervalTime" type="time" class="field-input" value="12:00" />
-          </div>
-          <div class="flex items-center gap-4">
-            <label class="flex items-center gap-2">
-              <input type="checkbox" id="intervalDaily" class="h-4 w-4" checked />
-              <span class="text-sm">Daily</span>
-            </label>
-            <label class="flex items-center gap-2">
-              <input type="checkbox" id="intervalCustom" class="h-4 w-4" />
-              <span class="text-sm">Custom days</span>
-            </label>
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-6">
           <button id="btnCancelInterval" class="btn btn--ghost">Cancel</button>
           <button id="btnConfirmInterval" class="btn btn--primary">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Team Modal -->
+    <div id="createTeamModal" class="modal hidden">
+      <div class="modal__backdrop"></div>
+      <div class="modal__content modal__content--sm">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold">Create New Team</h2>
+          <button id="btnCloseCreateTeam" class="text-slate-400 hover:text-slate-600">&times;</button>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="field-label">Team Name</label>
+            <input id="newTeamName" class="field-input" placeholder="e.g. Security Team, DevOps" />
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-6">
+          <button id="btnCancelCreateTeam" class="btn btn--ghost">Cancel</button>
+          <button id="btnConfirmCreateTeam" class="btn btn--primary">Create Team</button>
         </div>
       </div>
     </div>
