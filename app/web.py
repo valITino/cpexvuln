@@ -295,6 +295,99 @@ def create_app(args):
             "count": len(formatted_results),
         })
 
+    @app.post("/api/quick-scan")
+    def api_quick_scan():
+        """Run a quick scan without saving to watchlist."""
+        if not check_csrf():
+            return jsonify({"error": "Invalid CSRF token"}), 403
+        data = request.get_json() or {}
+        cpes_raw = data.get("cpes", [])
+        win = (data.get("window") or "7d").lower()
+        kev_only = data.get("kevOnly", False)
+
+        # Parse CPEs
+        if isinstance(cpes_raw, str):
+            cpes = [c.strip() for c in cpes_raw.split(",") if c.strip()]
+        else:
+            cpes = [c.strip() for c in cpes_raw if c and c.strip()]
+
+        if not cpes:
+            return jsonify({"error": "No CPEs provided"}), 400
+
+        # Determine time window
+        if win == "24h":
+            force_since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
+        elif win == "7d":
+            force_since = now_utc() - timedelta(days=7)
+        elif win == "14d":
+            force_since = now_utc() - timedelta(days=14)
+        elif win == "30d":
+            force_since = now_utc() - timedelta(days=30)
+        elif win == "90d":
+            force_since = now_utc() - timedelta(days=LONG_BACKFILL_DAYS)
+        else:
+            force_since = now_utc() - timedelta(days=7)
+
+        session_obj = build_session(
+            https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
+            http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
+            ca_bundle=args.ca_bundle,
+            insecure=args.insecure,
+            timeout=int(args.timeout or 60),
+        )
+
+        # Run scan without state tracking (quick scan doesn't persist)
+        state_all = {}
+        state_key = "quick_scan_temp"
+        results, _ = run_scan(
+            cpes=cpes,
+            state_all=state_all,
+            state_key=state_key,
+            session=session_obj,
+            insecure=args.insecure,
+            since=force_since,
+            kev_only=kev_only,
+        )
+
+        # Transform results for frontend
+        formatted_results = []
+        for r in results:
+            formatted_results.append({
+                "id": r.get("cve"),
+                "cve": r.get("cve"),
+                "published": r.get("published"),
+                "lastModified": r.get("lastModified"),
+                "sourceIdentifier": r.get("sourceIdentifier"),
+                "kev": r.get("kev", False),
+                "kev_data": r.get("kev_data", {}),
+                "epss": r.get("epss"),
+                "epss_percentile": r.get("epss_percentile"),
+                "cvssScore": r.get("score"),
+                "severity": r.get("severity"),
+                "description": r.get("description"),
+                "cwes": r.get("cwes", []),
+                "refs": r.get("refs", []),
+                "references": r.get("refs", []),
+                "matchedCPE": [r.get("matched_cpe_query")] if r.get("matched_cpe_query") else [],
+                "is_new": True,  # All results are "new" for quick scan
+            })
+
+        window_labels = {
+            "24h": "last 24 hours",
+            "7d": "last 7 days",
+            "14d": "last 14 days",
+            "30d": "last 30 days",
+            "90d": "last 90 days",
+        }
+        window_label = window_labels.get(win, "last 7 days")
+
+        return jsonify({
+            "results": formatted_results,
+            "windowLabel": window_label,
+            "count": len(formatted_results),
+            "scannedCpes": cpes,
+        })
+
     @app.get("/api/cpe_suggest")
     def api_cpe_suggest():
         # Simple CPE suggestion endpoint
