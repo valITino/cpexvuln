@@ -768,7 +768,7 @@
       if (dom.tablePagination) dom.tablePagination.classList.add('hidden');
       if (dom.resultsLoading) dom.resultsLoading.classList.remove('hidden');
       if (dom.loadingStatus) dom.loadingStatus.textContent = message || 'Loading...';
-      dom.alerts.innerHTML = '';
+      if (dom.alerts) dom.alerts.innerHTML = '';
     }
 
     function updateLoadingStatus(message) {
@@ -1447,9 +1447,18 @@
       });
 
       dom.btnAddCpe?.addEventListener('click', () => {
+        const vendorField = document.getElementById('b_vendor');
+        const productField = document.getElementById('b_product');
+        const vendor = vendorField?.value?.trim() || '';
+        const product = productField?.value?.trim() || '';
+
+        if (!vendor || !product) {
+          showAlert('Please fill in at least vendor and product fields.', 'warning');
+          return;
+        }
+
         const cpe = buildCpe();
-        if (cpe && !cpe.includes(':*:*:*:*:*:*:*:*:*:*')) addCpeToList(cpe);
-        else showAlert('Please fill in at least vendor and product fields.', 'warning');
+        addCpeToList(cpe);
       });
 
       dom.btnAddManualCpe?.addEventListener('click', () => {
