@@ -16,6 +16,16 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Vulnerability-Lookup API constants
 VULNERABILITY_LOOKUP_BASE = os.getenv("VULN_LOOKUP_API_BASE", "https://vulnerability.circl.lu")
 DEFAULT_TIMEOUT = 60
+
+# CA Certificate configuration
+# Priority: CLI --ca-bundle > REQUESTS_CA_BUNDLE > SSL_CERT_FILE > CURL_CA_BUNDLE
+def get_ca_bundle_from_env():
+    """Get CA bundle path from environment variables (in priority order)."""
+    return (
+        os.getenv("REQUESTS_CA_BUNDLE") or
+        os.getenv("SSL_CERT_FILE") or
+        os.getenv("CURL_CA_BUNDLE")
+    )
 DAILY_LOOKBACK_HOURS = 24      # daily window
 LONG_BACKFILL_DAYS = 90        # backfill depth
 BACKFILL_PERIOD_DAYS = 90      # do a 90d backfill every 90 days

@@ -1,3 +1,11 @@
+"""
+Core scanning logic for vulnerability detection.
+
+This module handles the scanning of CPEs against the Vulnerability-Lookup API,
+with state management for tracking what's been scanned.
+"""
+
+import logging
 from typing import List, Tuple, Optional, Dict
 
 from .utils import now_utc, iso, parse_iso
@@ -11,6 +19,8 @@ from .vulnerabilitylookup import (
     extract_cwes,
     extract_references,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_scan(
@@ -43,10 +53,17 @@ def run_scan(
     per_cpe = dict(entry.get("per_cpe") or {})
     last_long_rescan = entry.get("last_long_rescan")
 
+    logger.info(f"Starting scan for {len(cpes)} CPE(s)")
+    logger.debug(f"Time window: {since} to {now}")
+    logger.debug(f"State key: {state_key}")
+
     all_vulns: Dict[str, dict] = {}
     any_success = False
+    failed_cpes = []
+    successful_cpes = []
 
-    for cpe in cpes:
+    for idx, cpe in enumerate(cpes, 1):
+        logger.info(f"[{idx}/{len(cpes)}] Scanning CPE: {cpe}")
         try:
             vulns = fetch_for_cpe(
                 session,
@@ -56,11 +73,19 @@ def run_scan(
                 insecure,
             )
             any_success = True
+            successful_cpes.append(cpe)
             per_cpe[cpe] = iso(now)
+
+            if vulns:
+                logger.info(f"  Found {len(vulns)} vulnerabilities for {cpe}")
+            else:
+                logger.debug(f"  No vulnerabilities found for {cpe}")
+
             for item in vulns:
                 # Vulnerability-Lookup format: CVE ID at top level or in 'id' field
                 cve_id = item.get("id") or item.get("cve", {}).get("id")
                 if not cve_id:
+                    logger.debug(f"  Skipping vulnerability without CVE ID: {item.keys()}")
                     continue
 
                 metrics = extract_metrics(item)
@@ -90,21 +115,51 @@ def run_scan(
                     "cwes": extract_cwes(item),
                     "vulnStatus": item.get("vulnStatus") or item.get("state"),
                 }
+
                 previous = all_vulns.get(cve_id)
                 if not previous or (record["lastModified"] or "") > (previous.get("lastModified") or ""):
                     all_vulns[cve_id] = record
-        except Exception as exc:  # pragma: no cover - network edge cases
-            print(f"[WARN] request failed for {cpe}: {exc}")
 
-    out_list = sorted(all_vulns.values(), key=lambda value: (value["lastModified"] or value["published"] or ""))
+        except Exception as exc:
+            failed_cpes.append(cpe)
+            logger.error(f"  Failed to scan {cpe}: {exc}")
+            logger.debug(f"  Exception details:", exc_info=True)
 
+    # Log scan summary
+    logger.info(f"Scan complete: {len(successful_cpes)} CPEs successful, {len(failed_cpes)} failed")
+    if failed_cpes:
+        logger.warning(f"Failed CPEs: {', '.join(failed_cpes)}")
+    logger.info(f"Total unique vulnerabilities found: {len(all_vulns)}")
+
+    # Sort by date
+    out_list = sorted(
+        all_vulns.values(),
+        key=lambda value: (value["lastModified"] or value["published"] or ""),
+        reverse=True  # Most recent first
+    )
+
+    # Update state
     updated = {"version": 3, "per_cpe": per_cpe}
     if any_success and (now - since).days >= 89:
         updated["last_long_rescan"] = iso(now)
+        logger.debug("Long rescan completed - updating last_long_rescan timestamp")
     elif last_long_rescan:
         updated["last_long_rescan"] = last_long_rescan
 
+    # Filter for KEV-only if requested
     if kev_only:
+        kev_count = len([r for r in out_list if r.get("kev")])
+        logger.info(f"KEV-only filter: {kev_count} KEV vulnerabilities out of {len(out_list)} total")
         out_list = [record for record in out_list if record.get("kev")]
+
+    # Log severity breakdown
+    severity_counts = {}
+    for record in out_list:
+        sev = record.get("severity", "None")
+        severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+    if severity_counts:
+        severity_str = ", ".join(f"{k}: {v}" for k, v in sorted(severity_counts.items()))
+        logger.info(f"Severity breakdown: {severity_str}")
 
     return out_list, updated

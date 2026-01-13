@@ -24,8 +24,17 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging with more detail
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
+
+# Enable debug logging for app modules when DEBUG env var is set
+if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
+    logging.getLogger("app").setLevel(logging.DEBUG)
 
 try:
     # Absolute imports from the package
@@ -39,6 +48,7 @@ try:
         OUT_DIR,
         DAILY_LOOKBACK_HOURS,
         LONG_BACKFILL_DAYS,
+        get_ca_bundle_from_env,
     )
 except Exception as e:
     # Helpful message if the package can't be imported
@@ -52,11 +62,16 @@ except Exception as e:
 
 
 def add_common_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--https-proxy", default=None, help="HTTPS proxy, e.g. https://user:pass@host:port")
-    p.add_argument("--http-proxy", default=None, help="HTTP proxy, e.g. http://user:pass@host:port")
-    p.add_argument("--ca-bundle", default=None, help="Path to custom CA bundle (PEM).")
-    p.add_argument("--insecure", action="store_true", help="Skip TLS verification (NOT recommended).")
-    p.add_argument("--timeout", type=int, default=60, help="HTTP timeout (seconds).")
+    p.add_argument("--https-proxy", default=None,
+                   help="HTTPS proxy, e.g. https://user:pass@host:port (env: HTTPS_PROXY)")
+    p.add_argument("--http-proxy", default=None,
+                   help="HTTP proxy, e.g. http://user:pass@host:port (env: HTTP_PROXY)")
+    p.add_argument("--ca-bundle", default=None,
+                   help="Path to custom CA bundle (PEM). Also reads from env: REQUESTS_CA_BUNDLE, SSL_CERT_FILE, CURL_CA_BUNDLE")
+    p.add_argument("--insecure", action="store_true",
+                   help="Skip TLS verification (NOT recommended).")
+    p.add_argument("--timeout", type=int, default=60,
+                   help="HTTP timeout in seconds (default: 60).")
 
 
 def main():
@@ -89,6 +104,29 @@ def main():
     args = ap.parse_args()
 
     if args.cmd == "web":
+        # Log startup configuration
+        logger.info("=" * 60)
+        logger.info("CPExVuln - Vulnerability Management System")
+        logger.info("=" * 60)
+        logger.info(f"Starting web server on http://{args.host}:{args.port}")
+        logger.info(f"API Base URL: {os.environ.get('VULN_LOOKUP_API_BASE', 'https://vulnerability.circl.lu')}")
+
+        # Log proxy configuration
+        https_proxy = args.https_proxy or os.environ.get("HTTPS_PROXY")
+        http_proxy = args.http_proxy or os.environ.get("HTTP_PROXY")
+        ca_bundle = args.ca_bundle or get_ca_bundle_from_env()
+
+        if https_proxy:
+            logger.info(f"HTTPS Proxy: configured")
+        if http_proxy:
+            logger.info(f"HTTP Proxy: configured")
+        if ca_bundle:
+            logger.info(f"CA Bundle: {ca_bundle}")
+        if args.insecure:
+            logger.warning("TLS verification DISABLED (--insecure flag)")
+        logger.info(f"Timeout: {args.timeout}s")
+        logger.info("-" * 60)
+
         # Optionally start scheduler alongside web UI
         if args.with_scheduler:
             logger.info("Starting scheduler alongside web UI...")
@@ -99,6 +137,7 @@ def main():
         app = create_app(args)
         # Disable reloader when running inside PyCharm debugger to avoid double-starts
         try:
+            logger.info("Web server starting... Press Ctrl+C to stop.")
             app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
         finally:
             if args.with_scheduler:
@@ -139,11 +178,14 @@ def main():
             print("No CPEs found to scan.")
             sys.exit(2)
 
-        # HTTP session
+        # HTTP session with proxy and certificate support
+        ca_bundle = args.ca_bundle or get_ca_bundle_from_env()
+        if ca_bundle:
+            logger.info(f"Using CA bundle: {ca_bundle}")
         session = build_session(
             https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
             http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
-            ca_bundle=args.ca_bundle,
+            ca_bundle=ca_bundle,
             insecure=args.insecure,
             timeout=args.timeout,
         )

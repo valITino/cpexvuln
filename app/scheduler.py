@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 import logging
 
-from .config import SCAN_SCHEDULE, WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS
+import os
+from .config import SCAN_SCHEDULE, WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS, get_ca_bundle_from_env
 from .utils import load_json, now_utc
 from .vulnerabilitylookup import build_session
 from .scan import run_scan
@@ -102,8 +103,23 @@ class ScanScheduler:
             # Load state
             state_all = load_json(STATE_FILE, default={})
 
-            # Build session
-            session = build_session()
+            # Build session with proxy and certificate support from environment
+            ca_bundle = get_ca_bundle_from_env()
+            https_proxy = os.environ.get("HTTPS_PROXY")
+            http_proxy = os.environ.get("HTTP_PROXY")
+
+            if ca_bundle:
+                logger.info(f"Using CA bundle from environment: {ca_bundle}")
+            if https_proxy:
+                logger.debug(f"Using HTTPS proxy from environment")
+            if http_proxy:
+                logger.debug(f"Using HTTP proxy from environment")
+
+            session = build_session(
+                https_proxy=https_proxy,
+                http_proxy=http_proxy,
+                ca_bundle=ca_bundle,
+            )
 
             # Scan each watchlist
             for watchlist in watchlists:

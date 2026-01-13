@@ -4,15 +4,18 @@ import csv
 import io
 import json
 import secrets
+import logging
 from datetime import timedelta
 
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify, session
 
-from .config import WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS, LONG_BACKFILL_DAYS
+from .config import WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS, LONG_BACKFILL_DAYS, get_ca_bundle_from_env, VULNERABILITY_LOOKUP_BASE
 from .utils import load_json, save_json, now_utc, hash_for_cpes
-from .vulnerabilitylookup import build_session
+from .vulnerabilitylookup import build_session, test_api_connection
 from .scan import run_scan
 from .scan_history import add_scan_result, get_new_vulnerabilities
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(args):
@@ -221,13 +224,15 @@ def create_app(args):
             force_since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
 
         options = current.get("options", {})
+        ca_bundle = options.get("caBundle") or args.ca_bundle or get_ca_bundle_from_env()
         session_obj = build_session(
             https_proxy=options.get("httpsProxy") or args.https_proxy or os.environ.get("HTTPS_PROXY"),
             http_proxy=options.get("httpProxy") or args.http_proxy or os.environ.get("HTTP_PROXY"),
-            ca_bundle=options.get("caBundle") or args.ca_bundle,
+            ca_bundle=ca_bundle,
             insecure=options.get("insecure", False) or args.insecure,
             timeout=int(options.get("timeout") or args.timeout or 60),
         )
+        logger.info(f"Running scan for watchlist: {current.get('name')} with {len(current.get('cpes', []))} CPEs")
         state_all = load_json(STATE_FILE, {})
         state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
@@ -328,13 +333,15 @@ def create_app(args):
         else:
             force_since = now_utc() - timedelta(days=7)
 
+        ca_bundle = args.ca_bundle or get_ca_bundle_from_env()
         session_obj = build_session(
             https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
             http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
-            ca_bundle=args.ca_bundle,
+            ca_bundle=ca_bundle,
             insecure=args.insecure,
             timeout=int(args.timeout or 60),
         )
+        logger.info(f"Quick scan starting for {len(cpes)} CPEs with window {win}")
 
         # Run scan without state tracking (quick scan doesn't persist)
         state_all = {}
@@ -396,6 +403,37 @@ def create_app(args):
         # For now, return empty suggestions - could be extended to query CPE dictionary
         return jsonify({"suggestions": []})
 
+    @app.get("/api/test-connection")
+    def api_test_connection():
+        """Test connectivity to the Vulnerability-Lookup API."""
+        ca_bundle = args.ca_bundle or get_ca_bundle_from_env()
+        session_obj = build_session(
+            https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
+            http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
+            ca_bundle=ca_bundle,
+            insecure=args.insecure,
+            timeout=int(args.timeout or 30),
+        )
+        logger.info("Testing API connection...")
+        result = test_api_connection(session_obj, insecure=args.insecure)
+        return jsonify(result)
+
+    @app.get("/api/config")
+    def api_config():
+        """Return current configuration (sanitized)."""
+        https_proxy = args.https_proxy or os.environ.get("HTTPS_PROXY")
+        http_proxy = args.http_proxy or os.environ.get("HTTP_PROXY")
+        ca_bundle = args.ca_bundle or get_ca_bundle_from_env()
+
+        return jsonify({
+            "api_base": VULNERABILITY_LOOKUP_BASE,
+            "https_proxy": "configured" if https_proxy else None,
+            "http_proxy": "configured" if http_proxy else None,
+            "ca_bundle": ca_bundle if ca_bundle else None,
+            "insecure": args.insecure,
+            "timeout": args.timeout or 60,
+        })
+
     # ========================================
     # Legacy form-based endpoints (backward compatibility)
     # ========================================
@@ -446,13 +484,15 @@ def create_app(args):
         else:
             force_since = now_utc() - timedelta(days=LONG_BACKFILL_DAYS)
 
+        ca_bundle = args.ca_bundle or get_ca_bundle_from_env()
         session_obj = build_session(
             https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
             http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
-            ca_bundle=args.ca_bundle,
+            ca_bundle=ca_bundle,
             insecure=current.get("insecure", False) or args.insecure,
             timeout=args.timeout,
         )
+        logger.info(f"Legacy scan for watchlist: {current.get('name', 'Unknown')}")
         state_all = load_json(STATE_FILE, {})
         state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
@@ -467,6 +507,8 @@ def create_app(args):
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
             save_json(STATE_FILE, state_all)
+
+        logger.info(f"Scan completed: {len(results)} vulnerabilities found")
 
         # Mark new vulnerabilities
         new_cve_ids = set()
@@ -525,13 +567,15 @@ def create_app(args):
             force_since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
         else:
             force_since = now_utc() - timedelta(days=LONG_BACKFILL_DAYS)
+        ca_bundle = args.ca_bundle or get_ca_bundle_from_env()
         session_obj = build_session(
             https_proxy=args.https_proxy or os.environ.get("HTTPS_PROXY"),
             http_proxy=args.http_proxy or os.environ.get("HTTP_PROXY"),
-            ca_bundle=args.ca_bundle,
+            ca_bundle=ca_bundle,
             insecure=current.get("insecure", False) or args.insecure,
             timeout=args.timeout,
         )
+        logger.info(f"Export scan for watchlist: {current.get('name', 'Unknown')}")
         state_all = load_json(STATE_FILE, {})
         state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
@@ -546,6 +590,7 @@ def create_app(args):
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
             save_json(STATE_FILE, state_all)
+        logger.info(f"Export scan completed: {len(results)} vulnerabilities")
         return current, results
 
     @app.get("/export/<wid>.json")
