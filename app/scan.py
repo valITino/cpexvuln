@@ -1,6 +1,7 @@
 from typing import List, Tuple, Dict
 
 from .utils import now_utc, iso
+from .config import DEFAULT_VULN_SOURCES
 from .vulnerabilitylookup import (
     fetch_for_cpe,
     fetch_cisa_kev_data,
@@ -27,6 +28,7 @@ def run_scan(
     insecure: bool,
     since,
     kev_only: bool = False,
+    sources: List[str] | None = None,
 ) -> Tuple[List[dict], dict]:
     """
     Run vulnerability scan for multiple CPE strings.
@@ -45,6 +47,7 @@ def run_scan(
         state_all[state_key] = {"version": 3, "last_long_rescan": ISO, "per_cpe": {cpe: ISO}}
     """
     now = now_utc()
+    normalized_sources = [s for s in (sources or DEFAULT_VULN_SOURCES) if s]
     entry = state_all.get(state_key) or {}
     per_cpe = dict(entry.get("per_cpe") or {})
     last_long_rescan = entry.get("last_long_rescan")
@@ -66,7 +69,7 @@ def run_scan(
                 since,
                 now,
                 insecure,
-                sources=["cvelist5", "nvd"],
+                sources=normalized_sources,
             )
             any_success = True
             per_cpe[cpe] = iso(now)
