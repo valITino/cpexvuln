@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify, session
 
-from .config import WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS, LONG_BACKFILL_DAYS
+from .config import WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS, LONG_BACKFILL_DAYS, DEFAULT_VULN_SOURCES
 from .utils import load_json, save_json, now_utc, hash_for_cpes
 from .vulnerabilitylookup import build_session
 from .scan import run_scan
@@ -32,6 +32,20 @@ def create_app(args):
         if "_csrf_token" not in session:
             session["_csrf_token"] = secrets.token_hex(32)
         return session["_csrf_token"]
+
+    def normalize_sources(raw_sources):
+        if not raw_sources:
+            return list(DEFAULT_VULN_SOURCES)
+        if isinstance(raw_sources, str):
+            sources = [s.strip() for s in raw_sources.split(",") if s.strip()]
+        elif isinstance(raw_sources, list):
+            sources = [str(s).strip() for s in raw_sources if str(s).strip()]
+        else:
+            sources = []
+
+        allowed = {source.lower(): source for source in DEFAULT_VULN_SOURCES}
+        filtered = [allowed[s.lower()] for s in sources if s.lower() in allowed]
+        return filtered or list(DEFAULT_VULN_SOURCES)
 
     def csrf_token():
         return generate_csrf_token()
@@ -146,13 +160,15 @@ def create_app(args):
             else:
                 project_id = wl["projects"][0]["id"]
 
+        options = data.get("options", {}) or {}
+        options["sources"] = normalize_sources(options.get("sources"))
         watchlist = {
             "id": str(uuid.uuid4()),
             "name": data.get("name", "").strip() or f"Watchlist {len(wl.get('lists', [])) + 1}",
             "projectId": project_id,
             "cpes": cpes,
             "comments": data.get("comments", ""),
-            "options": data.get("options", {}),
+            "options": options,
             "order": len([w for w in wl.get("lists", []) if w.get("projectId") == project_id]),
         }
         wl.setdefault("lists", []).append(watchlist)
@@ -184,7 +200,9 @@ def create_app(args):
                 watchlist["name"] = data.get("name", watchlist.get("name", ""))
                 watchlist["cpes"] = cpes if cpes else watchlist.get("cpes", [])
                 watchlist["comments"] = data.get("comments", watchlist.get("comments", ""))
-                watchlist["options"] = data.get("options", watchlist.get("options", {}))
+                options = data.get("options", watchlist.get("options", {})) or {}
+                options["sources"] = normalize_sources(options.get("sources"))
+                watchlist["options"] = options
                 if data.get("projectId"):
                     watchlist["projectId"] = data["projectId"]
                 write_watchlists(wl)
@@ -221,6 +239,7 @@ def create_app(args):
             force_since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
 
         options = current.get("options", {})
+        sources = normalize_sources(options.get("sources"))
         session_obj = build_session(
             https_proxy=options.get("httpsProxy") or args.https_proxy or os.environ.get("HTTPS_PROXY"),
             http_proxy=options.get("httpProxy") or args.http_proxy or os.environ.get("HTTP_PROXY"),
@@ -238,6 +257,7 @@ def create_app(args):
             insecure=options.get("insecure", False) or args.insecure,
             since=force_since,
             kev_only=options.get("hasKev", False),
+            sources=sources,
         )
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
@@ -304,6 +324,7 @@ def create_app(args):
         cpes_raw = data.get("cpes", [])
         win = (data.get("window") or "7d").lower()
         kev_only = data.get("kevOnly", False)
+        sources = normalize_sources(data.get("sources"))
 
         # Parse CPEs
         if isinstance(cpes_raw, str):
@@ -347,6 +368,7 @@ def create_app(args):
             insecure=args.insecure,
             since=force_since,
             kev_only=kev_only,
+            sources=sources,
         )
 
         # Transform results for frontend

@@ -25,6 +25,7 @@
     const settingsKey = 'cpexvtops-settings';
     const mitigatedKey = 'cpexvtops-mitigated';
     const welcomeHiddenKey = 'cpexvtops-welcome-hidden';
+    const DEFAULT_SOURCES = ['cvelist5', 'nvd'];
 
     // Load persisted state
     const collapsedInitial = new Set();
@@ -280,8 +281,8 @@
       async runWatchlist(id, window) {
         return requestJson('/api/run', { method: 'POST', body: { watchlistId: id, window } });
       },
-      async quickScan(cpes, window, kevOnly = false) {
-        return requestJson('/api/quick-scan', { method: 'POST', body: { cpes, window, kevOnly } });
+      async quickScan(cpes, window, kevOnly = false, sources = []) {
+        return requestJson('/api/quick-scan', { method: 'POST', body: { cpes, window, kevOnly, sources } });
       },
     };
 
@@ -327,6 +328,20 @@
       box.textContent = message;
       dom.alerts.appendChild(box);
       if (timeout) setTimeout(() => box.remove(), timeout);
+    }
+
+    function getSelectedSources(scope) {
+      return Array.from(document.querySelectorAll(`input[data-source][data-scope="${scope}"]`))
+        .filter((input) => input.checked)
+        .map((input) => input.dataset.source)
+        .filter(Boolean);
+    }
+
+    function setSelectedSources(scope, sources = []) {
+      const selected = new Set((sources && sources.length ? sources : DEFAULT_SOURCES).map((s) => s.toLowerCase()));
+      document.querySelectorAll(`input[data-source][data-scope="${scope}"]`).forEach((input) => {
+        input.checked = selected.has((input.dataset.source || '').toLowerCase());
+      });
     }
 
     function saveCollapsed() {
@@ -604,6 +619,7 @@
       if (dom.optHttpsProxy) dom.optHttpsProxy.value = '';
       if (dom.optCaBundle) dom.optCaBundle.value = '';
       if (dom.optTimeout) dom.optTimeout.value = '';
+      setSelectedSources('full', DEFAULT_SOURCES);
     }
 
     function fillForm(watch) {
@@ -621,6 +637,7 @@
       if (dom.optHttpsProxy) dom.optHttpsProxy.value = options.httpsProxy || '';
       if (dom.optCaBundle) dom.optCaBundle.value = options.caBundle || '';
       if (dom.optTimeout) dom.optTimeout.value = options.timeout || '';
+      setSelectedSources('full', options.sources || DEFAULT_SOURCES);
       state.cpeList = [...watch.cpes];
       renderCpeList();
     }
@@ -640,6 +657,7 @@
           httpsProxy: dom.optHttpsProxy?.value || null,
           caBundle: dom.optCaBundle?.value || null,
           timeout: dom.optTimeout?.value || null,
+          sources: getSelectedSources('full'),
         },
       };
     }
@@ -681,6 +699,16 @@
         return null;
       }
 
+      if (state.cpeList.length === 0) {
+        showAlert('Please add at least one CPE to the watchlist.', 'error');
+        return null;
+      }
+
+      if (!payload.options.sources.length) {
+        showAlert('Please select at least one data source.', 'error');
+        return null;
+      }
+
       const watchId = dom.formWatchId?.value;
       try {
         let response;
@@ -714,6 +742,12 @@
         return;
       }
 
+      const sources = getSelectedSources('quick');
+      if (!sources.length) {
+        showAlert('Please select at least one data source.', 'error');
+        return;
+      }
+
       state.pendingRun = true;
       setRunButtonsDisabled(true);
       showLoadingState('Connecting to vulnerability database...');
@@ -722,7 +756,7 @@
 
       try {
         updateLoadingStatus('Scanning CPEs for vulnerabilities...');
-        const result = await api.quickScan(state.cpeList, state.scanPeriod, kevOnly);
+        const result = await api.quickScan(state.cpeList, state.scanPeriod, kevOnly, sources);
 
         state.originalResults = result.results || [];
         state.windowLabel = result.windowLabel || '';
@@ -1742,6 +1776,8 @@
       // Set initial mode and step
       setScanMode('quick');
       setCurrentStep(1);
+      setSelectedSources('quick', DEFAULT_SOURCES);
+      setSelectedSources('full', DEFAULT_SOURCES);
 
       // Apply initial filters
       applyFilters();

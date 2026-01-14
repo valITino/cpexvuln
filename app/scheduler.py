@@ -101,15 +101,14 @@ class ScanScheduler:
             # Load state
             state_all = load_json(STATE_FILE, default={})
 
-            # Build session
-            session = build_session()
-
             # Scan each watchlist
             for watchlist in watchlists:
                 wl_id = watchlist.get("id")
                 wl_name = watchlist.get("name", "Unnamed")
                 cpes = watchlist.get("cpes", [])
-                insecure = watchlist.get("insecure", False)
+                options = watchlist.get("options", {}) or {}
+                insecure = options.get("insecure", False)
+                sources = options.get("sources")
 
                 if not cpes:
                     logger.warning(f"Watchlist '{wl_name}' has no CPEs, skipping.")
@@ -118,6 +117,13 @@ class ScanScheduler:
                 logger.info(f"Scanning watchlist: {wl_name} ({len(cpes)} CPEs)")
 
                 try:
+                    session = build_session(
+                        https_proxy=options.get("httpsProxy"),
+                        http_proxy=options.get("httpProxy"),
+                        ca_bundle=options.get("caBundle"),
+                        insecure=insecure,
+                        timeout=int(options.get("timeout") or 60),
+                    )
                     # Use 24-hour lookback for scheduled scans
                     since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
                     state_key = f"vuln:{hash_for_cpes(cpes)}"
@@ -130,7 +136,8 @@ class ScanScheduler:
                         session=session,
                         insecure=insecure,
                         since=since,
-                        kev_only=False,
+                        kev_only=options.get("hasKev", False),
+                        sources=sources,
                     )
 
                     # Update state

@@ -341,6 +341,21 @@
               </div>
 
               <div class="mb-4">
+                <label class="filter-label mb-2">Data Sources:</label>
+                <div class="source-grid">
+                  <label class="source-pill">
+                    <input type="checkbox" checked data-scope="quick" data-source="cvelist5" class="h-4 w-4" />
+                    <span>cvelist5 (CVE List v5)</span>
+                  </label>
+                  <label class="source-pill">
+                    <input type="checkbox" checked data-scope="quick" data-source="nvd" class="h-4 w-4" />
+                    <span>nvd (NVD)</span>
+                  </label>
+                </div>
+                <p class="text-xs text-slate-500 mt-1">Use high-quality sources for consistent coverage.</p>
+              </div>
+
+              <div class="mb-4">
                 <label class="filter-label mb-2">Scan Options:</label>
                 <div class="space-y-2">
                   <label class="flex items-center gap-2 text-sm">
@@ -410,6 +425,21 @@
                   <label class="flex items-center gap-2"><input id="optNoRejected" type="checkbox" class="h-4 w-4" checked />Exclude rejected</label>
                   <label class="flex items-center gap-2"><input id="optHasKev" type="checkbox" class="h-4 w-4" />KEV only</label>
                 </div>
+              </div>
+
+              <div class="mb-4">
+                <label class="filter-label mb-2">Data Sources:</label>
+                <div class="source-grid">
+                  <label class="source-pill">
+                    <input type="checkbox" checked data-scope="full" data-source="cvelist5" class="h-4 w-4" />
+                    <span>cvelist5 (CVE List v5)</span>
+                  </label>
+                  <label class="source-pill">
+                    <input type="checkbox" checked data-scope="full" data-source="nvd" class="h-4 w-4" />
+                    <span>nvd (NVD)</span>
+                  </label>
+                </div>
+                <p class="text-xs text-slate-500 mt-1">Default sources recommended for production-grade coverage.</p>
               </div>
 
               <!-- Schedule Section -->
