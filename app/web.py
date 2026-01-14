@@ -391,8 +391,8 @@ def create_app(args):
     @app.get("/api/cpe_suggest")
     def api_cpe_suggest():
         # Simple CPE suggestion endpoint
-        vendor = request.args.get("vendor", "")
-        product = request.args.get("product", "")
+        request.args.get("vendor", "")
+        request.args.get("product", "")
         # For now, return empty suggestions - could be extended to query CPE dictionary
         return jsonify({"suggestions": []})
 

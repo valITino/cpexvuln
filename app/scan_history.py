@@ -2,8 +2,8 @@
 Scan history management for tracking vulnerability changes over time.
 Enables "New" vulnerability detection by comparing consecutive scans.
 """
-from typing import List, Dict, Any, Optional, Set
-from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
+from datetime import timedelta
 import uuid
 
 from .utils import now_utc, iso, parse_iso, load_json, save_json

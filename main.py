@@ -60,7 +60,10 @@ def add_common_flags(p: argparse.ArgumentParser) -> None:
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="main.py", description="Vulnerability Management System – web UI, scheduler, and scans")
+    ap = argparse.ArgumentParser(
+        prog="main.py",
+        description="Vulnerability Management System – web UI, scheduler, and scans",
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     # web subcommand

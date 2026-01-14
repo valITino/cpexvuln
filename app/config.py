@@ -14,7 +14,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Vulnerability-Lookup API constants
-VULNERABILITY_LOOKUP_BASE = os.getenv("VULN_LOOKUP_API_BASE", "https://vulnerability.circl.lu")
+VULNERABILITY_LOOKUP_BASE = os.getenv("VULN_LOOKUP_API_BASE", "https://vulnerability.circl.lu/api")
 DEFAULT_TIMEOUT = 60
 DAILY_LOOKBACK_HOURS = 24      # daily window
 LONG_BACKFILL_DAYS = 90        # backfill depth

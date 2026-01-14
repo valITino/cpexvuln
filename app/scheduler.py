@@ -3,9 +3,8 @@ Automated scanning scheduler for vulnerability monitoring.
 Runs scans at configured times (default: 07:30, 12:30, 16:00, 19:30).
 """
 import threading
-import time
 from datetime import datetime, timedelta
-from typing import Callable, Optional
+from typing import Optional
 import logging
 
 from .config import SCAN_SCHEDULE, WATCHLISTS_FILE, STATE_FILE, DAILY_LOOKBACK_HOURS
