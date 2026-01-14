@@ -603,6 +603,15 @@ body {
   border-radius: 0.25rem;
 }
 
+.watchlist-schedule {
+  display: inline-flex;
+  align-items: center;
+  color: rgb(148 163 184);
+  background-color: rgb(241 245 249);
+  border-radius: 999px;
+  padding: 0.125rem 0.25rem;
+}
+
 /* ============================================
    CPE BUILDER
    ============================================ */
