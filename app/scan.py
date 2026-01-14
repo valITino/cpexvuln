@@ -11,6 +11,7 @@ from typing import List, Tuple, Optional, Dict
 from .utils import now_utc, iso, parse_iso
 from .vulnerabilitylookup import (
     fetch_for_cpe,
+    fetch_epss as fetch_epss_from_api,
     extract_metrics,
     is_kev,
     extract_kev_data,
@@ -130,6 +131,23 @@ def run_scan(
     if failed_cpes:
         logger.warning(f"Failed CPEs: {', '.join(failed_cpes)}")
     logger.info(f"Total unique vulnerabilities found: {len(all_vulns)}")
+
+    # Enrich vulnerabilities missing EPSS data
+    vulns_missing_epss = [cve_id for cve_id, v in all_vulns.items() if v.get("epss") is None]
+    if vulns_missing_epss:
+        logger.info(f"Fetching EPSS scores for {len(vulns_missing_epss)} vulnerabilities...")
+        for cve_id in vulns_missing_epss:
+            try:
+                epss_result = fetch_epss_from_api(session, cve_id, insecure)
+                if epss_result:
+                    all_vulns[cve_id]["epss"] = epss_result.get("epss")
+                    all_vulns[cve_id]["epss_percentile"] = epss_result.get("percentile")
+            except Exception as e:
+                logger.debug(f"Failed to fetch EPSS for {cve_id}: {e}")
+
+        # Count how many we enriched
+        enriched = sum(1 for cve_id in vulns_missing_epss if all_vulns[cve_id].get("epss") is not None)
+        logger.info(f"Enriched {enriched}/{len(vulns_missing_epss)} vulnerabilities with EPSS scores")
 
     # Sort by date
     out_list = sorted(
