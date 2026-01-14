@@ -47,6 +47,17 @@ def create_app(args):
         filtered = [allowed[s.lower()] for s in sources if s.lower() in allowed]
         return filtered or list(DEFAULT_VULN_SOURCES)
 
+    def normalize_schedule_times(raw_times):
+        if raw_times is None:
+            return []
+        if isinstance(raw_times, str):
+            times = [t.strip() for t in raw_times.split(",")]
+        elif isinstance(raw_times, list):
+            times = [str(t).strip() for t in raw_times]
+        else:
+            times = []
+        return sorted({t for t in times if t})
+
     def csrf_token():
         return generate_csrf_token()
 
@@ -162,6 +173,7 @@ def create_app(args):
 
         options = data.get("options", {}) or {}
         options["sources"] = normalize_sources(options.get("sources"))
+        options["scheduleTimes"] = normalize_schedule_times(options.get("scheduleTimes"))
         watchlist = {
             "id": str(uuid.uuid4()),
             "name": data.get("name", "").strip() or f"Watchlist {len(wl.get('lists', [])) + 1}",
@@ -202,6 +214,8 @@ def create_app(args):
                 watchlist["comments"] = data.get("comments", watchlist.get("comments", ""))
                 options = data.get("options", watchlist.get("options", {})) or {}
                 options["sources"] = normalize_sources(options.get("sources"))
+                schedule_times = options.get("scheduleTimes", watchlist.get("options", {}).get("scheduleTimes"))
+                options["scheduleTimes"] = normalize_schedule_times(schedule_times)
                 watchlist["options"] = options
                 if data.get("projectId"):
                     watchlist["projectId"] = data["projectId"]
@@ -280,6 +294,12 @@ def create_app(args):
         # Transform results for frontend
         formatted_results = []
         for r in results:
+            cvss_score = r.get("score")
+            if cvss_score is None:
+                cvss_score = (r.get("metrics") or {}).get("baseScore")
+            severity = r.get("severity")
+            if not severity:
+                severity = (r.get("metrics") or {}).get("baseSeverity")
             formatted_results.append({
                 "id": r.get("cve"),
                 "cve": r.get("cve"),
@@ -290,8 +310,8 @@ def create_app(args):
                 "kev_data": r.get("kev_data", {}),
                 "epss": r.get("epss"),
                 "epss_percentile": r.get("epss_percentile"),
-                "cvssScore": r.get("score"),
-                "severity": r.get("severity"),
+                "cvssScore": cvss_score,
+                "severity": severity,
                 "description": r.get("description"),
                 "cwes": r.get("cwes", []),
                 "refs": r.get("refs", []),
@@ -374,6 +394,12 @@ def create_app(args):
         # Transform results for frontend
         formatted_results = []
         for r in results:
+            cvss_score = r.get("score")
+            if cvss_score is None:
+                cvss_score = (r.get("metrics") or {}).get("baseScore")
+            severity = r.get("severity")
+            if not severity:
+                severity = (r.get("metrics") or {}).get("baseSeverity")
             formatted_results.append({
                 "id": r.get("cve"),
                 "cve": r.get("cve"),
@@ -384,8 +410,8 @@ def create_app(args):
                 "kev_data": r.get("kev_data", {}),
                 "epss": r.get("epss"),
                 "epss_percentile": r.get("epss_percentile"),
-                "cvssScore": r.get("score"),
-                "severity": r.get("severity"),
+                "cvssScore": cvss_score,
+                "severity": severity,
                 "description": r.get("description"),
                 "cwes": r.get("cwes", []),
                 "refs": r.get("refs", []),

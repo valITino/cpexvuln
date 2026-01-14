@@ -485,6 +485,31 @@ body {
   margin-bottom: 0.5rem;
 }
 
+.team-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: rgb(100 116 139);
+}
+
+.team-card__count {
+  background-color: rgb(226 232 240);
+  color: rgb(71 85 105);
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.team-card__empty {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background-color: rgb(248 250 252);
+  color: rgb(148 163 184);
+  font-size: 0.75rem;
+}
+
 .team-card__actions {
   display: flex;
   align-items: center;
@@ -948,6 +973,11 @@ body {
 
 .cvss-low {
   color: #16a34a;
+}
+
+.cvss-unknown {
+  color: #94a3b8;
+  font-weight: 500;
 }
 
 /* EPSS Colors */

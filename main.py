@@ -59,6 +59,16 @@ def add_common_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--timeout", type=int, default=60, help="HTTP timeout (seconds).")
 
 
+def session_defaults_from_args(args) -> dict:
+    return {
+        "https_proxy": getattr(args, "https_proxy", None),
+        "http_proxy": getattr(args, "http_proxy", None),
+        "ca_bundle": getattr(args, "ca_bundle", None),
+        "insecure": getattr(args, "insecure", False),
+        "timeout": getattr(args, "timeout", None),
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(
         prog="main.py",
@@ -75,6 +85,7 @@ def main():
 
     # scheduler subcommand
     schedp = sub.add_parser("scheduler", help="Run automated vulnerability scanning scheduler")
+    add_common_flags(schedp)
     schedp.add_argument("--once", action="store_true", help="Run all watchlists once and exit")
 
     # run subcommand
@@ -95,7 +106,7 @@ def main():
         # Optionally start scheduler alongside web UI
         if args.with_scheduler:
             logger.info("Starting scheduler alongside web UI...")
-            scheduler = get_scheduler()
+            scheduler = get_scheduler(session_defaults=session_defaults_from_args(args))
             scheduler.start()
 
         # Pass flags into the Flask app factory so routes can reuse them
@@ -110,7 +121,7 @@ def main():
 
     if args.cmd == "scheduler":
         logger.info("Starting vulnerability scanning scheduler...")
-        scheduler = get_scheduler()
+        scheduler = get_scheduler(session_defaults=session_defaults_from_args(args))
 
         if args.once:
             logger.info("Running all watchlists once...")

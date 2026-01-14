@@ -2,6 +2,7 @@
 Automated scanning scheduler for vulnerability monitoring.
 Runs scans at configured times (default: 07:30, 12:30, 16:00, 19:30).
 """
+import os
 import threading
 from datetime import datetime, timedelta
 from typing import Optional
@@ -22,28 +23,68 @@ class ScanScheduler:
     Manages scheduled vulnerability scans for all watchlists.
     """
 
-    def __init__(self, scan_times: Optional[list] = None):
+    def __init__(self, scan_times: Optional[list] = None, session_defaults: Optional[dict] = None):
         """
         Initialize the scheduler.
 
         Args:
             scan_times: List of scan times in HH:MM format (default: from config)
         """
-        self.scan_times = scan_times or SCAN_SCHEDULE
+        self.default_scan_times = scan_times or SCAN_SCHEDULE
+        self.session_defaults = session_defaults or {}
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-    def parse_time(self, time_str: str) -> tuple:
+    def update_defaults(self, scan_times: Optional[list] = None, session_defaults: Optional[dict] = None):
+        """Update scheduler defaults for scan times or session settings."""
+        if scan_times is not None:
+            self.default_scan_times = scan_times
+        if session_defaults:
+            self.session_defaults.update(session_defaults)
+
+    def parse_time(self, time_str: str) -> Optional[tuple]:
         """Parse HH:MM format into (hour, minute) tuple."""
         try:
             parts = time_str.strip().split(":")
             hour = int(parts[0])
             minute = int(parts[1]) if len(parts) > 1 else 0
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError("Out of range")
             return (hour, minute)
         except (ValueError, IndexError):
             logger.error(f"Invalid time format: {time_str}, expected HH:MM")
-            return (0, 0)
+            return None
+
+    def normalize_scan_times(self, raw_times) -> list:
+        """Normalize scan times input into sorted list of unique HH:MM strings."""
+        if raw_times is None:
+            return []
+        if isinstance(raw_times, str):
+            times = [t.strip() for t in raw_times.split(",")]
+        elif isinstance(raw_times, list):
+            times = [str(t).strip() for t in raw_times]
+        else:
+            times = []
+        return sorted({t for t in times if t})
+
+    def _load_watchlists(self) -> list:
+        wl_data = load_json(WATCHLISTS_FILE, default={"lists": []})
+        return wl_data.get("lists", [])
+
+    def _watchlist_scan_times(self, watchlist: dict) -> list:
+        options = watchlist.get("options", {}) or {}
+        schedule_times = options.get("scheduleTimes")
+        times = self.normalize_scan_times(schedule_times)
+        return times or self.normalize_scan_times(self.default_scan_times)
+
+    def _scan_times_pool(self, watchlists: list) -> list:
+        times: list = []
+        for watch in watchlists:
+            times.extend(self._watchlist_scan_times(watch))
+        if not times:
+            times = self.normalize_scan_times(self.default_scan_times)
+        return times
 
     def get_next_scan_time(self) -> datetime:
         """
@@ -54,9 +95,14 @@ class ScanScheduler:
         """
         now = now_utc()
         today = now.date()
+        watchlists = self._load_watchlists()
 
         # Parse all scan times
-        scan_times_parsed = [self.parse_time(t) for t in self.scan_times]
+        scan_times_parsed = []
+        for time_str in self._scan_times_pool(watchlists):
+            parsed = self.parse_time(time_str)
+            if parsed:
+                scan_times_parsed.append(parsed)
 
         # Create datetime objects for today's scan times
         scheduled_times = []
@@ -83,17 +129,23 @@ class ScanScheduler:
                 # No scan times configured, default to 1 hour from now
                 return now + timedelta(hours=1)
 
-    def run_all_watchlists(self):
+    def _should_run_watchlist(self, watchlist: dict, run_at: datetime) -> bool:
+        for time_str in self._watchlist_scan_times(watchlist):
+            parsed = self.parse_time(time_str)
+            if not parsed:
+                continue
+            hour, minute = parsed
+            if run_at.hour == hour and run_at.minute == minute:
+                return True
+        return False
+
+    def _run_watchlists(self, watchlists: list):
         """
         Execute scans for all configured watchlists.
         """
-        logger.info("Starting scheduled scan for all watchlists...")
+        logger.info("Starting scheduled scan for watchlists...")
 
         try:
-            # Load watchlists
-            wl_data = load_json(WATCHLISTS_FILE, default={"lists": []})
-            watchlists = wl_data.get("lists", [])
-
             if not watchlists:
                 logger.info("No watchlists configured, skipping scan.")
                 return
@@ -117,12 +169,24 @@ class ScanScheduler:
                 logger.info(f"Scanning watchlist: {wl_name} ({len(cpes)} CPEs)")
 
                 try:
+                    https_proxy = (
+                        options.get("httpsProxy")
+                        or self.session_defaults.get("https_proxy")
+                        or os.environ.get("HTTPS_PROXY")
+                    )
+                    http_proxy = (
+                        options.get("httpProxy")
+                        or self.session_defaults.get("http_proxy")
+                        or os.environ.get("HTTP_PROXY")
+                    )
+                    ca_bundle = options.get("caBundle") or self.session_defaults.get("ca_bundle")
+                    timeout = int(options.get("timeout") or self.session_defaults.get("timeout") or 60)
                     session = build_session(
-                        https_proxy=options.get("httpsProxy"),
-                        http_proxy=options.get("httpProxy"),
-                        ca_bundle=options.get("caBundle"),
-                        insecure=insecure,
-                        timeout=int(options.get("timeout") or 60),
+                        https_proxy=https_proxy,
+                        http_proxy=http_proxy,
+                        ca_bundle=ca_bundle,
+                        insecure=insecure or self.session_defaults.get("insecure", False),
+                        timeout=timeout,
                     )
                     # Use 24-hour lookback for scheduled scans
                     since = now_utc() - timedelta(hours=DAILY_LOOKBACK_HOURS)
@@ -161,16 +225,30 @@ class ScanScheduler:
             from .utils import save_json
             save_json(STATE_FILE, state_all)
 
-            logger.info("Scheduled scan complete for all watchlists.")
+            logger.info("Scheduled scan complete.")
 
         except Exception as exc:
             logger.error(f"Error during scheduled scan: {exc}")
+
+    def run_all_watchlists(self):
+        watchlists = self._load_watchlists()
+        logger.info("Starting scheduled scan for all watchlists...")
+        self._run_watchlists(watchlists)
+
+    def run_due_watchlists(self, run_at: Optional[datetime] = None):
+        run_at = run_at or now_utc()
+        watchlists = self._load_watchlists()
+        due = [wl for wl in watchlists if self._should_run_watchlist(wl, run_at)]
+        if not due:
+            logger.info("No watchlists scheduled for this time.")
+            return
+        self._run_watchlists(due)
 
     def _scheduler_loop(self):
         """
         Main scheduler loop that runs in a background thread.
         """
-        logger.info(f"Scheduler started with times: {self.scan_times}")
+        logger.info(f"Scheduler started with times: {self.default_scan_times}")
 
         while not self._stop_event.is_set():
             next_scan = self.get_next_scan_time()
@@ -192,7 +270,7 @@ class ScanScheduler:
 
             # Run the scans
             try:
-                self.run_all_watchlists()
+                self.run_due_watchlists(next_scan)
             except Exception as exc:
                 logger.error(f"Scheduled scan failed: {exc}")
 
@@ -238,11 +316,13 @@ class ScanScheduler:
 _scheduler_instance: Optional[ScanScheduler] = None
 
 
-def get_scheduler() -> ScanScheduler:
+def get_scheduler(scan_times: Optional[list] = None, session_defaults: Optional[dict] = None) -> ScanScheduler:
     """Get or create the global scheduler instance."""
     global _scheduler_instance
     if _scheduler_instance is None:
-        _scheduler_instance = ScanScheduler()
+        _scheduler_instance = ScanScheduler(scan_times=scan_times, session_defaults=session_defaults)
+    elif scan_times is not None or session_defaults:
+        _scheduler_instance.update_defaults(scan_times=scan_times, session_defaults=session_defaults)
     return _scheduler_instance
 
 
