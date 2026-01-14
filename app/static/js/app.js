@@ -207,6 +207,7 @@
       detailDesc: document.getElementById('d_desc'),
       detailCvss: document.getElementById('d_cvss'),
       detailEpss: document.getElementById('d_epss'),
+      detailEpssPercentile: document.getElementById('d_epss_percentile'),
       detailSeverity: document.getElementById('d_severity'),
       detailCwes: document.getElementById('d_cwes'),
       detailKev: document.getElementById('d_kev'),
@@ -544,6 +545,7 @@
 
     function populateProjectSelect() {
       if (!dom.formProject) return;
+      const currentValue = dom.formProject.value;
       dom.formProject.innerHTML = '';
 
       if (state.projects.length === 0) {
@@ -560,6 +562,12 @@
         option.textContent = project.name;
         dom.formProject.appendChild(option);
       });
+
+      if (currentValue && state.projects.some((project) => project.id === currentValue)) {
+        dom.formProject.value = currentValue;
+      } else {
+        dom.formProject.value = state.projects[0].id;
+      }
     }
 
     function selectWatchlist(id, runImmediately = false, window = '7d') {
@@ -636,8 +644,32 @@
       };
     }
 
+    async function ensureProjectSelected() {
+      if (!dom.formProject) return '';
+      if (dom.formProject.value) return dom.formProject.value;
+
+      if (state.projects.length === 0) {
+        const response = await api.createProject('Default Team');
+        if (response?.project) {
+          state.projects.push(response.project);
+          populateProjectSelect();
+          renderSidebar();
+          return response.project.id;
+        }
+      }
+
+      if (state.projects.length > 0) {
+        dom.formProject.value = state.projects[0].id;
+        return dom.formProject.value;
+      }
+
+      return '';
+    }
+
     async function saveWatchlist() {
+      const projectId = await ensureProjectSelected();
       const payload = gatherFormData();
+      if (projectId && !payload.projectId) payload.projectId = projectId;
 
       if (!payload.projectId) {
         showAlert('Please select a team first.', 'error');
@@ -683,6 +715,7 @@
       }
 
       state.pendingRun = true;
+      setRunButtonsDisabled(true);
       showLoadingState('Connecting to vulnerability database...');
 
       const kevOnly = dom.quickOptKev?.checked || false;
@@ -712,6 +745,7 @@
         showAlert('Scan failed. Please try again.', 'error', 5000);
       } finally {
         state.pendingRun = false;
+        setRunButtonsDisabled(false);
       }
     }
 
@@ -732,6 +766,7 @@
       }
 
       state.pendingRun = true;
+      setRunButtonsDisabled(true);
       showLoadingState('Connecting to vulnerability database...');
 
       try {
@@ -759,6 +794,7 @@
         showAlert('Scan failed. Please try again.', 'error', 5000);
       } finally {
         state.pendingRun = false;
+        setRunButtonsDisabled(false);
       }
     }
 
@@ -1040,11 +1076,13 @@
         const rawDesc = item.description || '';
         const desc = rawDesc.substring(0, 80) + (rawDesc.length > 80 ? '...' : '');
 
+        const sourceLabel = item.sourceIdentifier || 'Unspecified';
+
         tr.innerHTML = `
           <td class="text-indigo-700 font-medium whitespace-nowrap">${escapeHtml(item.id)}${badges}</td>
           <td>${kevIcon}</td>
           <td class="whitespace-nowrap">${escapeHtml(item.published?.split('T')[0]) || '-'}</td>
-          <td class="text-xs text-slate-500">${escapeHtml(item.sourceIdentifier) || '-'}</td>
+          <td class="text-xs text-slate-500">${escapeHtml(sourceLabel)}</td>
           <td class="description-cell text-xs" title="${escapeHtml(rawDesc)}">${escapeHtml(desc)}</td>
           <td class="${cvssClass}">${score ?? '-'}</td>
           <td class="${epssClass}">${epssDisplay}</td>
@@ -1084,7 +1122,7 @@
 
       // Update metadata
       if (dom.detailMeta) {
-        dom.detailMeta.textContent = `Published: ${item.published || 'N/A'} | Source: ${item.sourceIdentifier || 'N/A'}`;
+        dom.detailMeta.textContent = `Published: ${item.published || 'N/A'} | Source: ${item.sourceIdentifier || 'Unspecified'}`;
       }
 
       // Update stats
@@ -1109,6 +1147,13 @@
         }
         dom.detailEpss.className = `detail-stat__value ${epssClass}`;
         dom.detailEpss.textContent = epssText;
+      }
+
+      if (dom.detailEpssPercentile) {
+        const percentile = item.epss_percentile;
+        dom.detailEpssPercentile.textContent = percentile !== null && percentile !== undefined
+          ? `${(percentile * 100).toFixed(2)}%`
+          : 'N/A';
       }
 
       if (dom.detailSeverity) {
@@ -1139,6 +1184,11 @@
             ${kd.dateAdded ? `<div><strong>Date Added:</strong> ${escapeHtml(kd.dateAdded)}</div>` : ''}
             ${kd.dueDate ? `<div><strong>Due Date:</strong> ${escapeHtml(kd.dueDate)}</div>` : ''}
             ${kd.requiredAction ? `<div><strong>Required Action:</strong> ${escapeHtml(kd.requiredAction)}</div>` : ''}
+            ${kd.vulnerabilityName ? `<div><strong>Vulnerability:</strong> ${escapeHtml(kd.vulnerabilityName)}</div>` : ''}
+            ${kd.vendorProject ? `<div><strong>Vendor/Project:</strong> ${escapeHtml(kd.vendorProject)}</div>` : ''}
+            ${kd.product ? `<div><strong>Product:</strong> ${escapeHtml(kd.product)}</div>` : ''}
+            ${kd.knownRansomwareCampaignUse ? `<div><strong>Ransomware:</strong> ${escapeHtml(kd.knownRansomwareCampaignUse)}</div>` : ''}
+            ${kd.notes ? `<div><strong>Notes:</strong> ${escapeHtml(kd.notes)}</div>` : ''}
           `;
         } else {
           dom.detailKev.classList.add('hidden');
@@ -1355,6 +1405,12 @@
       } catch (err) {
         console.error('Create team failed', err);
       }
+    }
+
+    function setRunButtonsDisabled(disabled) {
+      if (dom.btnQuickScan) dom.btnQuickScan.disabled = disabled;
+      if (dom.btnSaveAndScan) dom.btnSaveAndScan.disabled = disabled;
+      if (dom.btnSaveOnly) dom.btnSaveOnly.disabled = disabled;
     }
 
     // Event bindings

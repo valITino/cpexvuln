@@ -651,7 +651,7 @@
                 </div>
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <div class="detail-stat">
                   <span class="detail-stat__label">CVSS Score</span>
                   <span class="detail-stat__value" id="d_cvss">-</span>
@@ -659,6 +659,10 @@
                 <div class="detail-stat">
                   <span class="detail-stat__label">EPSS Score</span>
                   <span class="detail-stat__value" id="d_epss">-</span>
+                </div>
+                <div class="detail-stat">
+                  <span class="detail-stat__label">EPSS Percentile</span>
+                  <span class="detail-stat__value" id="d_epss_percentile">-</span>
                 </div>
                 <div class="detail-stat">
                   <span class="detail-stat__label">Severity</span>
@@ -684,7 +688,7 @@
                   </svg>
                   CISA Known Exploited Vulnerability
                 </div>
-                <div id="d_kev_details" class="text-sm text-red-600 space-y-1"></div>
+                <div id="d_kev_details" class="text-sm text-red-600 space-y-1 break-words"></div>
               </div>
 
               <div id="d_refs" class="mb-4">

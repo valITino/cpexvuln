@@ -3,6 +3,8 @@ from typing import List, Tuple, Dict
 from .utils import now_utc, iso
 from .vulnerabilitylookup import (
     fetch_for_cpe,
+    fetch_cisa_kev_data,
+    fetch_epss,
     extract_cve_id,
     extract_metrics,
     is_kev,
@@ -11,6 +13,7 @@ from .vulnerabilitylookup import (
     extract_description,
     extract_cwes,
     extract_references,
+    extract_source_identifier,
     extract_published_date,
     extract_last_modified_date,
 )
@@ -48,6 +51,12 @@ def run_scan(
 
     all_vulns: Dict[str, dict] = {}
     any_success = False
+    kev_map: Dict[str, Dict[str, object]] = {}
+
+    try:
+        kev_map = fetch_cisa_kev_data(session, insecure)
+    except Exception:
+        kev_map = {}
 
     for cpe in cpes:
         try:
@@ -57,6 +66,7 @@ def run_scan(
                 since,
                 now,
                 insecure,
+                sources=["cvelist5", "nvd"],
             )
             any_success = True
             per_cpe[cpe] = iso(now)
@@ -68,18 +78,25 @@ def run_scan(
 
                 metrics = extract_metrics(item)
                 epss_data = extract_epss(item)
-                kev_flag = is_kev(item)
-                kev_metadata = extract_kev_data(item) if kev_flag else {}
+                kev_from_record = is_kev(item)
+                kev_from_catalog = cve_id.upper() in kev_map
+                kev_flag = kev_from_record or kev_from_catalog
+                kev_metadata = extract_kev_data(item) if kev_from_record else {}
+                if kev_from_catalog:
+                    kev_metadata = {**kev_map[cve_id.upper()], **kev_metadata}
 
                 # Get dates - Vulnerability-Lookup uses different field names
                 published = extract_published_date(item)
                 last_modified = extract_last_modified_date(item)
 
+                if epss_data.get("score") is None:
+                    epss_data = fetch_epss(session, cve_id, insecure)
+
                 record = {
                     "cve": cve_id,
                     "published": published,
                     "lastModified": last_modified,
-                    "sourceIdentifier": item.get("sourceIdentifier") or item.get("assigner"),
+                    "sourceIdentifier": extract_source_identifier(item),
                     "kev": kev_flag,
                     "kev_data": kev_metadata,
                     "epss": epss_data.get("score"),
