@@ -16,6 +16,12 @@ def sample_cpe():
     return "cpe:2.3:a:vendor:product:1:*:*:*:*:*:*:*"
 
 
+@pytest.fixture(autouse=True)
+def disable_external_lookups(monkeypatch):
+    monkeypatch.setattr(scan, "fetch_cisa_kev_data", lambda *args, **kwargs: {})
+    monkeypatch.setattr(scan, "fetch_epss", lambda *args, **kwargs: {"score": None, "percentile": None})
+
+
 def test_run_scan_logs_warning_on_error(monkeypatch, sample_cpe, capsys):
     def fake_fetch(*args, **kwargs):
         raise RuntimeError("network boom")
@@ -40,7 +46,7 @@ def test_run_scan_logs_warning_on_error(monkeypatch, sample_cpe, capsys):
 def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
     now = datetime(2024, 1, 10, tzinfo=timezone.utc)
 
-    def fake_fetch(session, cpe, since, until, insecure=False):
+    def fake_fetch(session, cpe, since, until, insecure=False, sources=None):
         assert cpe == sample_cpe
         # Vulnerability-Lookup format
         return [
@@ -128,7 +134,7 @@ def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
 def test_run_scan_deduplicates_by_latest_modified(monkeypatch, sample_cpe):
     """Test that when multiple entries exist for the same CVE, the latest one is kept."""
 
-    def fake_fetch(session, cpe, since, until, insecure=False):
+    def fake_fetch(session, cpe, since, until, insecure=False, sources=None):
         # Return two entries for the same CVE with different modification dates
         return [
             {
@@ -168,7 +174,7 @@ def test_run_scan_deduplicates_by_latest_modified(monkeypatch, sample_cpe):
 def test_run_scan_handles_empty_response(monkeypatch, sample_cpe):
     """Test that empty API responses are handled gracefully."""
 
-    def fake_fetch(session, cpe, since, until, insecure=False):
+    def fake_fetch(session, cpe, since, until, insecure=False, sources=None):
         return []
 
     monkeypatch.setattr(scan, "fetch_for_cpe", fake_fetch)
@@ -187,7 +193,7 @@ def test_run_scan_handles_empty_response(monkeypatch, sample_cpe):
 
 
 def test_run_scan_handles_cvelistv5(monkeypatch, sample_cpe):
-    def fake_fetch(session, cpe, since, until, insecure=False):
+    def fake_fetch(session, cpe, since, until, insecure=False, sources=None):
         return [
             {
                 "cveMetadata": {
@@ -231,7 +237,7 @@ def test_run_scan_multiple_cpes(monkeypatch):
         "cpe:2.3:a:vendor2:product2:2:*:*:*:*:*:*:*",
     ]
 
-    def fake_fetch(session, cpe, since, until, insecure=False):
+    def fake_fetch(session, cpe, since, until, insecure=False, sources=None):
         if "vendor1" in cpe:
             return [{"id": "CVE-2024-1111", "last-modified": "2024-01-01T00:00:00.000Z", "cvss-metrics": []}]
         elif "vendor2" in cpe:
