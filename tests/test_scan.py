@@ -186,6 +186,44 @@ def test_run_scan_handles_empty_response(monkeypatch, sample_cpe):
     assert updated["per_cpe"][sample_cpe]  # State should still be updated
 
 
+def test_run_scan_handles_cvelistv5(monkeypatch, sample_cpe):
+    def fake_fetch(session, cpe, since, until, insecure=False):
+        return [
+            {
+                "cveMetadata": {
+                    "cveId": "CVE-2024-3333",
+                    "datePublished": "2024-05-01T00:00:00.000Z",
+                    "dateUpdated": "2024-05-02T00:00:00.000Z",
+                },
+                "containers": {
+                    "cna": {
+                        "descriptions": [{"lang": "en", "value": "CNA description"}],
+                        "metrics": [
+                            {"cvssV3_1": {"version": "3.1", "baseScore": 5.5, "vectorString": "CVSS:3.1/AV:N"}}
+                        ],
+                    }
+                },
+            }
+        ]
+
+    monkeypatch.setattr(scan, "fetch_for_cpe", fake_fetch)
+
+    results, _ = scan.run_scan(
+        cpes=[sample_cpe],
+        state_all={},
+        state_key="nvd:test",
+        session=object(),
+        insecure=False,
+        since=datetime.now(timezone.utc) - timedelta(days=30),
+    )
+
+    assert len(results) == 1
+    assert results[0]["cve"] == "CVE-2024-3333"
+    assert results[0]["published"] == "2024-05-01T00:00:00.000Z"
+    assert results[0]["lastModified"] == "2024-05-02T00:00:00.000Z"
+    assert results[0]["description"] == "CNA description"
+
+
 def test_run_scan_multiple_cpes(monkeypatch):
     """Test scanning multiple CPEs at once."""
     cpes = [

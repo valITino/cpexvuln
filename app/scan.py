@@ -1,8 +1,9 @@
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Dict
 
-from .utils import now_utc, iso, parse_iso
+from .utils import now_utc, iso
 from .vulnerabilitylookup import (
     fetch_for_cpe,
+    extract_cve_id,
     extract_metrics,
     is_kev,
     extract_kev_data,
@@ -10,6 +11,8 @@ from .vulnerabilitylookup import (
     extract_description,
     extract_cwes,
     extract_references,
+    extract_published_date,
+    extract_last_modified_date,
 )
 
 
@@ -59,7 +62,7 @@ def run_scan(
             per_cpe[cpe] = iso(now)
             for item in vulns:
                 # Vulnerability-Lookup format: CVE ID at top level or in 'id' field
-                cve_id = item.get("id") or item.get("cve", {}).get("id")
+                cve_id = extract_cve_id(item)
                 if not cve_id:
                     continue
 
@@ -69,8 +72,8 @@ def run_scan(
                 kev_metadata = extract_kev_data(item) if kev_flag else {}
 
                 # Get dates - Vulnerability-Lookup uses different field names
-                published = item.get("Published") or item.get("published")
-                last_modified = item.get("last-modified") or item.get("lastModified") or item.get("Modified")
+                published = extract_published_date(item)
+                last_modified = extract_last_modified_date(item)
 
                 record = {
                     "cve": cve_id,
