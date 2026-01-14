@@ -90,7 +90,9 @@
       manageMode: false,
       selectedIds: new Set(),
       collapsed: collapsedInitial,
-      pendingRun: false,
+      pendingRunQuick: false,
+      pendingRunFull: false,
+      pendingScheduled: new Set(),
       cpeList: [],
       scheduleIntervals: normalizeScheduleTimes(settings.scanTimes),
       scanPeriod: '7d',
@@ -99,6 +101,7 @@
       // New state for scan modes
       scanMode: 'quick', // 'quick' or 'full'
       currentStep: 1,
+      scheduledRuns: new Map(),
     };
 
     // DOM references
@@ -585,9 +588,27 @@
             lists.forEach((watch) => {
               const watchItem = document.createElement('div');
               watchItem.className = 'p-2 bg-slate-50 rounded text-xs cursor-pointer hover:bg-slate-100';
+              const scheduleTimes = normalizeScheduleTimes(watch.options?.scheduleTimes || []);
+              const hasSchedule = scheduleTimes.length > 0;
+              const isActive = watch.id === state.currentWatchId;
+              const scheduleIcon = hasSchedule
+                ? '<span class="watchlist-schedule" title="Scheduled scans"><svg viewBox="0 0 24 24" class="h-3 w-3" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></span>'
+                : '';
+              const scheduleDetails = isActive && hasSchedule
+                ? `<div class="scheduled-scans">
+                    <div class="scheduled-scan">
+                      <span class="text-slate-400">Scheduled:</span>
+                      ${scheduleTimes.map((time) => `<span class="scheduled-scan__time">${escapeHtml(time)}</span>`).join('')}
+                    </div>
+                  </div>`
+                : '';
               watchItem.innerHTML = `
-                <div class="font-medium text-slate-700">${escapeHtml(watch.name)}</div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="font-medium text-slate-700 truncate">${escapeHtml(watch.name)}</div>
+                  ${scheduleIcon}
+                </div>
                 <div class="text-slate-500 mt-1">${watch.cpes.length} CPE(s)</div>
+                ${scheduleDetails}
               `;
               watchItem.addEventListener('click', () => selectWatchlist(watch.id, false));
               cpeContainer.appendChild(watchItem);
@@ -786,7 +807,7 @@
 
     // Scan functions
     async function runQuickScan() {
-      if (state.pendingRun) return;
+      if (state.pendingRunQuick) return;
       if (state.cpeList.length === 0) {
         showAlert('Please add at least one CPE to scan.', 'error');
         return;
@@ -798,8 +819,8 @@
         return;
       }
 
-      state.pendingRun = true;
-      setRunButtonsDisabled(true);
+      state.pendingRunQuick = true;
+      updateQuickScanState();
       showLoadingState('Connecting to vulnerability database...');
 
       const kevOnly = dom.quickOptKev?.checked || false;
@@ -808,33 +829,20 @@
         updateLoadingStatus('Scanning CPEs for vulnerabilities...');
         const result = await api.quickScan(state.cpeList, state.scanPeriod, kevOnly, sources);
 
-        state.originalResults = result.results || [];
-        state.windowLabel = result.windowLabel || '';
-        hideLoadingState();
-        applyFilters();
-
-        showAlert(`Found ${state.originalResults.length} vulnerabilities.`, 'success', 3000);
-        if (dom.windowLabel) dom.windowLabel.textContent = `Quick Scan - ${state.windowLabel}`;
-
-        // Move to step 3 (results)
-        setCurrentStep(3);
-
-        // Enable export buttons
-        if (dom.btnExportCsv) dom.btnExportCsv.disabled = false;
-        if (dom.btnExportNdjson) dom.btnExportNdjson.disabled = false;
+        applyScanResults(result, 'Quick Scan', true);
 
       } catch (err) {
         console.error('Quick scan failed', err);
         hideLoadingState();
         showAlert('Scan failed. Please try again.', 'error', 5000);
       } finally {
-        state.pendingRun = false;
-        setRunButtonsDisabled(false);
+        state.pendingRunQuick = false;
+        updateQuickScanState();
       }
     }
 
     async function runWatchlistScan(window) {
-      if (state.pendingRun) return;
+      if (state.pendingRunFull) return;
 
       const watchId = dom.formWatchId?.value;
       if (!watchId) {
@@ -849,36 +857,23 @@
         return;
       }
 
-      state.pendingRun = true;
-      setRunButtonsDisabled(true);
+      state.pendingRunFull = true;
+      updateWatchlistActionState();
       showLoadingState('Connecting to vulnerability database...');
 
       try {
         updateLoadingStatus('Scanning CPEs for vulnerabilities...');
         const result = await api.runWatchlist(id, window);
 
-        state.originalResults = result.results || [];
-        state.windowLabel = result.windowLabel || '';
-        hideLoadingState();
-        applyFilters();
-
-        showAlert(`Found ${state.originalResults.length} vulnerabilities.`, 'success', 3000);
-        if (dom.windowLabel) dom.windowLabel.textContent = `Watchlist Scan - ${state.windowLabel}`;
-
-        // Move to step 3 (results)
-        setCurrentStep(3);
-
-        // Enable export buttons
-        if (dom.btnExportCsv) dom.btnExportCsv.disabled = false;
-        if (dom.btnExportNdjson) dom.btnExportNdjson.disabled = false;
+        applyScanResults(result, 'Watchlist Scan', true);
 
       } catch (err) {
         console.error('Scan failed', err);
         hideLoadingState();
         showAlert('Scan failed. Please try again.', 'error', 5000);
       } finally {
-        state.pendingRun = false;
-        setRunButtonsDisabled(false);
+        state.pendingRunFull = false;
+        updateWatchlistActionState();
       }
     }
 
@@ -897,6 +892,25 @@
 
     function hideLoadingState() {
       if (dom.resultsLoading) dom.resultsLoading.classList.add('hidden');
+    }
+
+    function applyScanResults(result, labelPrefix, showNotice) {
+      state.originalResults = result.results || [];
+      state.windowLabel = result.windowLabel || '';
+      hideLoadingState();
+      applyFilters();
+
+      if (showNotice) {
+        showAlert(`Found ${state.originalResults.length} vulnerabilities.`, 'success', 3000);
+      }
+      if (dom.windowLabel) dom.windowLabel.textContent = `${labelPrefix} - ${state.windowLabel}`;
+
+      // Move to step 3 (results)
+      setCurrentStep(3);
+
+      // Enable export buttons
+      if (dom.btnExportCsv) dom.btnExportCsv.disabled = false;
+      if (dom.btnExportNdjson) dom.btnExportNdjson.disabled = false;
     }
 
     // CPE List management
@@ -990,6 +1004,53 @@
           renderScheduleIntervals();
         });
         dom.scheduleIntervals.appendChild(item);
+      });
+    }
+
+    function getUtcTimeString(date = new Date()) {
+      const hours = String(date.getUTCHours()).padStart(2, '0');
+      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+
+    function getUtcDateString(date = new Date()) {
+      return date.toISOString().split('T')[0];
+    }
+
+    async function runScheduledScan(watch) {
+      if (!watch || state.pendingScheduled.has(watch.id)) return;
+      state.pendingScheduled.add(watch.id);
+      try {
+        const result = await api.runWatchlist(watch.id, '24h');
+        if (watch.id === state.currentWatchId) {
+          applyScanResults(result, 'Scheduled Scan', false);
+        }
+      } catch (err) {
+        console.error('Scheduled scan failed', err);
+        if (watch.id === state.currentWatchId) {
+          showAlert('Scheduled scan failed. Please try again.', 'error', 5000);
+        }
+      } finally {
+        state.pendingScheduled.delete(watch.id);
+      }
+    }
+
+    function checkScheduledScans() {
+      const now = new Date();
+      const currentTime = getUtcTimeString(now);
+      const currentDate = getUtcDateString(now);
+
+      state.lists.forEach((watch) => {
+        const scheduleTimes = normalizeScheduleTimes(watch.options?.scheduleTimes || []);
+        if (scheduleTimes.length === 0) return;
+        if (!scheduleTimes.includes(currentTime)) return;
+
+        const key = `${watch.id}:${currentTime}`;
+        const lastRunDate = state.scheduledRuns.get(key);
+        if (lastRunDate === currentDate) return;
+
+        state.scheduledRuns.set(key, currentDate);
+        runScheduledScan(watch);
       });
     }
 
@@ -1506,19 +1567,13 @@
       const hasSources = getSelectedSources('full').length > 0;
       const canSave = hasTeam && hasName && hasCpes && hasSources;
       if (dom.btnSaveOnly) dom.btnSaveOnly.disabled = !canSave;
-      if (dom.btnSaveAndScan) dom.btnSaveAndScan.disabled = !canSave || state.pendingRun;
+      if (dom.btnSaveAndScan) dom.btnSaveAndScan.disabled = !canSave || state.pendingRunFull;
     }
 
     function updateQuickScanState() {
       const hasCpes = state.cpeList.length > 0;
       const hasSources = getSelectedSources('quick').length > 0;
-      if (dom.btnQuickScan) dom.btnQuickScan.disabled = !hasCpes || !hasSources || state.pendingRun;
-    }
-
-    function setRunButtonsDisabled(disabled) {
-      if (dom.btnQuickScan) dom.btnQuickScan.disabled = disabled;
-      if (dom.btnSaveAndScan) dom.btnSaveAndScan.disabled = disabled;
-      if (dom.btnSaveOnly) dom.btnSaveOnly.disabled = disabled;
+      if (dom.btnQuickScan) dom.btnQuickScan.disabled = !hasCpes || !hasSources || state.pendingRunQuick;
     }
 
     // Event bindings
@@ -1881,6 +1936,9 @@
       if (state.windowLabel && dom.windowLabel) {
         dom.windowLabel.textContent = state.windowLabel;
       }
+
+      checkScheduledScans();
+      window.setInterval(checkScheduledScans, 60 * 1000);
     }
 
     return { init };

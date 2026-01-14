@@ -442,6 +442,8 @@ Start the interactive dashboard (binds to `127.0.0.1:5000` by default):
 python main.py web
 ```
 
+While the web UI is open, scheduled watchlist times also trigger automatic refresh scans in the browser session (keep the tab open to receive updates).
+
 **With integrated scheduler** (scans run automatically at configured times):
 
 ```bash
