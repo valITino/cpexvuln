@@ -501,6 +501,8 @@ def create_app(args):
             insecure=current.get("insecure", False) or args.insecure,
             timeout=args.timeout,
         )
+        options = current.get("options", {}) or {}
+        sources = normalize_sources(options.get("sources"))
         state_all = load_json(STATE_FILE, {})
         state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
@@ -511,6 +513,7 @@ def create_app(args):
             insecure=current.get("insecure", False) or args.insecure,
             since=force_since,
             kev_only=False,
+            sources=sources,
         )
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry
@@ -580,6 +583,8 @@ def create_app(args):
             insecure=current.get("insecure", False) or args.insecure,
             timeout=args.timeout,
         )
+        options = current.get("options", {}) or {}
+        sources = normalize_sources(options.get("sources"))
         state_all = load_json(STATE_FILE, {})
         state_key = f"vuln:{hash_for_cpes(current['cpes'])}"
         results, updated_entry = run_scan(
@@ -590,6 +595,7 @@ def create_app(args):
             insecure=current.get("insecure", False) or args.insecure,
             since=force_since,
             kev_only=False,
+            sources=sources,
         )
         if updated_entry.get("per_cpe"):
             state_all[state_key] = updated_entry

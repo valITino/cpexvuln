@@ -132,7 +132,7 @@ def test_run_scan_collects_latest_and_filters(monkeypatch, sample_cpe):
     assert record["severity"] == "Critical"
     assert record["kev"] is True
     assert record["description"] == "Example vuln updated"
-    assert record["cwes"] == ["CWE-89"]
+    assert set(record["cwes"]) == {"CWE-89", "CWE-79"}
     assert record["refs"][0]["url"] == "https://example2"
     assert updated["per_cpe"][sample_cpe]
 
@@ -175,6 +175,58 @@ def test_run_scan_deduplicates_by_latest_modified(monkeypatch, sample_cpe):
     assert results[0]["cve"] == "CVE-2024-1234"
     assert results[0]["description"] == "Updated description"
     assert results[0]["lastModified"] == "2024-01-15T00:00:00.000Z"
+
+
+def test_run_scan_merges_missing_scores(monkeypatch, sample_cpe):
+    def fake_fetch(session, cpe, since, until, insecure=False, sources=None):
+        return [
+            {
+                "id": "CVE-2024-7777",
+                "Published": "2024-01-01T00:00:00.000Z",
+                "last-modified": "2024-01-10T00:00:00.000Z",
+                "summary": "Older record with metrics",
+                "cvss-metrics": [
+                    {
+                        "cvssV3_1": {
+                            "version": "3.1",
+                            "baseScore": 7.4,
+                            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+                            "baseSeverity": "High",
+                        }
+                    }
+                ],
+                "epss": {
+                    "epss": 0.22,
+                    "percentile": 0.44,
+                },
+            },
+            {
+                "id": "CVE-2024-7777",
+                "Published": "2024-01-01T00:00:00.000Z",
+                "last-modified": "2024-01-12T00:00:00.000Z",
+                "summary": "Newer record missing metrics",
+                "cvss-metrics": [],
+            },
+        ]
+
+    monkeypatch.setattr(scan, "fetch_for_cpe", fake_fetch)
+
+    results, _ = scan.run_scan(
+        cpes=[sample_cpe],
+        state_all={},
+        state_key="nvd:test",
+        session=object(),
+        insecure=False,
+        since=datetime.now(timezone.utc) - timedelta(days=30),
+    )
+
+    assert len(results) == 1
+    record = results[0]
+    assert record["lastModified"] == "2024-01-12T00:00:00.000Z"
+    assert record["description"] == "Newer record missing metrics"
+    assert record["score"] == 7.4
+    assert record["epss"] == 0.22
+    assert record["epss_percentile"] == 0.44
 
 
 def test_run_scan_handles_empty_response(monkeypatch, sample_cpe):
