@@ -22,6 +22,60 @@ from .vulnerabilitylookup import (
 )
 
 
+def _record_timestamp(record: dict) -> str:
+    return record.get("lastModified") or record.get("published") or ""
+
+
+def _merge_records(primary: dict, secondary: dict) -> dict:
+    merged = dict(primary)
+
+    for key in ("published", "lastModified", "sourceIdentifier", "description", "matched_cpe_query", "vulnStatus"):
+        if not merged.get(key) and secondary.get(key):
+            merged[key] = secondary.get(key)
+
+    if secondary.get("kev"):
+        merged["kev"] = True
+        kev_data = merged.get("kev_data") or {}
+        kev_data.update(secondary.get("kev_data") or {})
+        merged["kev_data"] = kev_data
+
+    primary_score = merged.get("score")
+    if primary_score is None and isinstance(merged.get("metrics"), dict):
+        primary_score = merged["metrics"].get("baseScore")
+    secondary_score = secondary.get("score")
+    if secondary_score is None and isinstance(secondary.get("metrics"), dict):
+        secondary_score = secondary["metrics"].get("baseScore")
+    if primary_score is None and secondary_score is not None:
+        merged["metrics"] = secondary.get("metrics")
+        merged["score"] = secondary_score
+        merged["severity"] = secondary.get("severity") or (secondary.get("metrics") or {}).get("baseSeverity")
+    elif not merged.get("severity") and secondary.get("severity"):
+        merged["severity"] = secondary.get("severity")
+
+    if merged.get("epss") is None and secondary.get("epss") is not None:
+        merged["epss"] = secondary.get("epss")
+    if merged.get("epss_percentile") is None and secondary.get("epss_percentile") is not None:
+        merged["epss_percentile"] = secondary.get("epss_percentile")
+
+    if secondary.get("cwes"):
+        merged_cwes = merged.get("cwes") or []
+        merged["cwes"] = list(dict.fromkeys(merged_cwes + secondary.get("cwes", [])))
+
+    if secondary.get("refs"):
+        merged_refs = merged.get("refs") or []
+        seen_urls = {ref.get("url") for ref in merged_refs if isinstance(ref, dict)}
+        for ref in secondary.get("refs", []):
+            if not isinstance(ref, dict):
+                continue
+            if ref.get("url") in seen_urls:
+                continue
+            merged_refs.append(ref)
+            seen_urls.add(ref.get("url"))
+        merged["refs"] = merged_refs
+
+    return merged
+
+
 def run_scan(
     cpes: List[str],
     state_all: dict,
@@ -132,8 +186,13 @@ def run_scan(
                     "vulnStatus": item.get("vulnStatus") or item.get("state"),
                 }
                 previous = all_vulns.get(cve_id)
-                if not previous or (record["lastModified"] or "") > (previous.get("lastModified") or ""):
+                if not previous:
                     all_vulns[cve_id] = record
+                else:
+                    if _record_timestamp(record) > _record_timestamp(previous):
+                        all_vulns[cve_id] = _merge_records(record, previous)
+                    else:
+                        all_vulns[cve_id] = _merge_records(previous, record)
         except Exception as exc:  # pragma: no cover - network edge cases
             print(f"[WARN] request failed for {cpe}: {exc}")
 
