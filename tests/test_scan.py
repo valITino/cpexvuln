@@ -20,6 +20,12 @@ def sample_cpe():
 def disable_external_lookups(monkeypatch):
     monkeypatch.setattr(scan, "fetch_cisa_kev_data", lambda *args, **kwargs: {})
     monkeypatch.setattr(scan, "fetch_epss", lambda *args, **kwargs: {"score": None, "percentile": None})
+    monkeypatch.setattr(scan, "fetch_epss_first", lambda *args, **kwargs: {"score": None, "percentile": None})
+    monkeypatch.setattr(
+        scan,
+        "fetch_nvd_cvss",
+        lambda *args, **kwargs: {"version": None, "vector": None, "baseScore": None, "baseSeverity": "None"},
+    )
 
 
 def test_run_scan_logs_warning_on_error(monkeypatch, sample_cpe, capsys):
