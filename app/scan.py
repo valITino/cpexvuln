@@ -6,6 +6,7 @@ from .vulnerabilitylookup import (
     fetch_for_cpe,
     fetch_cisa_kev_data,
     fetch_epss,
+    fetch_epss_first,
     fetch_nvd_cvss,
     extract_cve_id,
     extract_metrics,
@@ -93,15 +94,20 @@ def run_scan(
                 published = extract_published_date(item)
                 last_modified = extract_last_modified_date(item)
 
-                # Fallback: fetch CVSS from NVD if not available from primary source
                 if metrics.get("baseScore") is None:
                     fetched_cvss = fetch_nvd_cvss(session, cve_id, insecure)
                     if fetched_cvss.get("baseScore") is not None:
                         metrics = fetched_cvss
 
-                # Fallback: fetch EPSS if not available from primary source
                 if epss_data.get("score") is None or epss_data.get("percentile") is None:
                     fetched_epss = fetch_epss(session, cve_id, insecure)
+                    if epss_data.get("score") is None:
+                        epss_data["score"] = fetched_epss.get("score")
+                    if epss_data.get("percentile") is None:
+                        epss_data["percentile"] = fetched_epss.get("percentile")
+
+                if epss_data.get("score") is None or epss_data.get("percentile") is None:
+                    fetched_epss = fetch_epss_first(session, cve_id, insecure)
                     if epss_data.get("score") is None:
                         epss_data["score"] = fetched_epss.get("score")
                     if epss_data.get("percentile") is None:
