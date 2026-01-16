@@ -17,6 +17,10 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 VULNERABILITY_LOOKUP_BASE = os.getenv("VULN_LOOKUP_API_BASE", "https://vulnerability.circl.lu/api")
 DEFAULT_VULN_SOURCES = ["cvelist5", "nvd"]
 DEFAULT_TIMEOUT = 60
+
+# NVD API for CVSS fallback when scores are missing from primary source
+NVD_API_BASE = os.getenv("NVD_API_BASE", "https://services.nvd.nist.gov/rest/json/cves/2.0")
+NVD_API_KEY = os.getenv("NVD_API_KEY", "")  # Optional: higher rate limits with API key
 DAILY_LOOKBACK_HOURS = 24      # daily window
 LONG_BACKFILL_DAYS = 90        # backfill depth
 BACKFILL_PERIOD_DAYS = 90      # do a 90d backfill every 90 days
